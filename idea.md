@@ -1,8 +1,4 @@
-# Book Generation Engine — Design Spec
-**Date:** 2026-04-17  
-**Status:** Approved
-
----
+# Book Generation Engine Idea
 
 ## 1. Goal
 
