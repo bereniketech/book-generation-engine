@@ -1,25 +1,36 @@
 from contextlib import asynccontextmanager
-from typing import Any
 
+import aio_pika
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.chapters import router as chapters_router
+from app.api.jobs import router as jobs_router
+from app.config import settings
+from supabase import create_client
+
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> Any:
-    # Startup: initialise RabbitMQ connection pool, Supabase client
+async def lifespan(app: FastAPI):
+    # Startup
+    app.state.supabase = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    amqp_connection = await aio_pika.connect_robust(settings.rabbitmq_url)
+    app.state.amqp_connection = amqp_connection
+    app.state.amqp_channel = await amqp_connection.channel()
     yield
-    # Shutdown: close connections
+    # Shutdown
+    await app.state.amqp_connection.close()
 
 
 app = FastAPI(title="Book Generation Engine", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # FILL: restrict in production
+    allow_origins=["*"],  # FILL: restrict to frontend origin in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Routers mounted in later tasks
+app.include_router(jobs_router)
+app.include_router(chapters_router)
