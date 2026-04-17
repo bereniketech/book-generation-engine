@@ -370,7 +370,20 @@ def test_app_api_package_importable():
 
 ## Handoff to Next Task
 
-**Files changed:** _(fill via /task-handoff)_
-**Decisions made:** _(fill via /task-handoff)_
-**Context for next task:** _(fill via /task-handoff)_
-**Open questions:** _(fill via /task-handoff)_
+**Files changed:** pyproject.toml, docker-compose.yml, Makefile, app/__init__.py, app/main.py, app/api/__init__.py, app/models/__init__.py, app/services/__init__.py, app/queue/__init__.py, app/ws/__init__.py, worker/__init__.py, worker/clients/__init__.py, worker/pipeline/__init__.py, worker/memory/__init__.py, tests/__init__.py, tests/unit/__init__.py, tests/integration/__init__.py, tests/unit/test_project_structure.py, supabase/migrations/001_initial_schema.sql, frontend/.gitkeep
+
+**Decisions made:** 
+- Pydantic v2 with strict type checking via mypy
+- Async-first FastAPI with CORS middleware pre-configured
+- Supabase Postgres backend with migrations in supabase/migrations/
+- Docker Compose for RabbitMQ (message queue) and Postgres (data store)
+- Separated app and worker packages for API and background job architecture
+
+**Context for next task:** 
+- Project scaffold complete with all dependencies installed
+- All tests pass, lint passes, type checking passes
+- FastAPI app skeleton ready for API routes (mounted in later tasks)
+- Database schema ready with jobs, chapters, artifacts tables
+- Docker services configured (requires Docker daemon to verify containers)
+
+**Open questions:** None

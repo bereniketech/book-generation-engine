@@ -19,6 +19,7 @@ Path: C:/Users/Hp/Desktop/Experiment/claude_kit
 - `.kit/skills/research-docs/professional-proofreader/SKILL.md` — proofreading pass on final manuscript
 - `.kit/skills/research-docs/research-information-retreival/SKILL.md` — research quality protocol for non-fiction LLM fallback (task-008)
 - `.kit/skills/research-docs/copywriting/SKILL.md` — conversion-copy rules for Intent/Positioning/Promise engines (tasks 006, 007)
+- `.kit/skills/_studio/batch-tasks/SKILL.md` — orchestrates all 18 tasks sequentially with /verify gates
 
 ## Selected Agents
 - `.kit/agents/board/company-coo.md` — master router across all companies
