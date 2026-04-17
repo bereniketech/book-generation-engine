@@ -1,0 +1,10 @@
+.kit/
+.spec/
+node_modules/
+__pycache__/
+.venv/
+target/
+dist/
+build/
+.env
+.env.*
