@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     rabbitmq_url: str = "amqp://guest:guest@localhost/"
     secret_key: str = "dev-secret-key"
+    frontend_url: str = "*"
     debug: bool = False
     smtp_host: str = ""
     smtp_port: int = 587

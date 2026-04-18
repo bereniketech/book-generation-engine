@@ -26,7 +26,7 @@ app = FastAPI(title="Book Generation Engine", version="0.1.0", lifespan=lifespan
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # FILL: restrict to frontend origin in production
+    allow_origins=[settings.frontend_url],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
