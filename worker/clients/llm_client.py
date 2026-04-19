@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from typing import Literal
 
@@ -17,6 +18,16 @@ log = get_logger(__name__)
 SUPPORTED_PROVIDERS = frozenset({"anthropic", "openai", "google", "ollama", "openai-compatible"})
 MAX_RETRIES = 3
 BACKOFF_BASE = 0.5  # seconds
+
+# ---------------------------------------------------------------------------
+# Fallback chain configuration (module-level, read once at import time)
+# ---------------------------------------------------------------------------
+LLM_FALLBACK_CHAIN: list[str] = [
+    p.strip()
+    for p in os.getenv("LLM_FALLBACK_CHAIN", "anthropic,openai,gemini").split(",")
+    if p.strip()
+]
+MAX_LLM_RETRIES: int = int(os.getenv("MAX_LLM_RETRIES", "2"))
 
 
 class LLMClient:
@@ -185,3 +196,180 @@ class LLMClient:
         return await loop.run_in_executor(
             None, self._dispatch_sync, prompt, system_prompt, job_id, stage
         )
+
+
+# ---------------------------------------------------------------------------
+# Module-level fallback chain functions
+# ---------------------------------------------------------------------------
+
+async def call_llm_with_fallback(
+    prompt: str,
+    job_id: str,
+    stage: str,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Call LLM providers in fallback chain order. Returns text response.
+
+    Tries each provider in LLM_FALLBACK_CHAIN up to MAX_LLM_RETRIES times.
+    Raises RuntimeError if all providers are exhausted.
+    """
+    last_error: Exception | None = None
+
+    for provider_name in LLM_FALLBACK_CHAIN:
+        for attempt in range(1, MAX_LLM_RETRIES + 1):
+            try:
+                response = await _call_provider(
+                    provider=provider_name,
+                    prompt=prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if provider_name != LLM_FALLBACK_CHAIN[0] or attempt > 1:
+                    log.info(
+                        "worker.llm.fallback",
+                        job_id=job_id,
+                        stage=stage,
+                        provider_used=provider_name,
+                        attempt=attempt,
+                    )
+                return response
+            except Exception as exc:
+                last_error = exc
+                log.warning(
+                    "worker.llm.attempt_failed",
+                    job_id=job_id,
+                    stage=stage,
+                    provider=provider_name,
+                    attempt=attempt,
+                    max_retries=MAX_LLM_RETRIES,
+                    error=str(exc),
+                )
+                if attempt < MAX_LLM_RETRIES:
+                    await asyncio.sleep(2 ** attempt)
+
+        if provider_name != LLM_FALLBACK_CHAIN[-1]:
+            next_provider = LLM_FALLBACK_CHAIN[LLM_FALLBACK_CHAIN.index(provider_name) + 1]
+            log.warning(
+                "worker.llm.provider_exhausted",
+                job_id=job_id,
+                stage=stage,
+                from_provider=provider_name,
+                to_provider=next_provider,
+                reason=str(last_error),
+            )
+
+    log.error(
+        "worker.llm.all_providers_failed",
+        job_id=job_id,
+        stage=stage,
+        chain=LLM_FALLBACK_CHAIN,
+        error=str(last_error),
+    )
+    raise RuntimeError(
+        f"All LLM providers failed for job {job_id} stage {stage}: {last_error}"
+    )
+
+
+async def _call_provider(
+    provider: str,
+    prompt: str,
+    temperature: float | None,
+    max_tokens: int | None,
+) -> str:
+    """Dispatch to the correct provider client. Returns response text."""
+    if provider == "anthropic":
+        return await _call_anthropic(prompt, temperature, max_tokens)
+    elif provider == "openai":
+        return await _call_openai(prompt, temperature, max_tokens)
+    elif provider == "gemini":
+        return await _call_gemini(prompt, temperature, max_tokens)
+    elif provider == "ollama":
+        return await _call_ollama(prompt, temperature, max_tokens)
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+
+async def _call_anthropic(
+    prompt: str,
+    temperature: float | None,
+    max_tokens: int | None,
+) -> str:
+    """Call Anthropic Claude. Requires ANTHROPIC_API_KEY env var."""
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise NotImplementedError("ANTHROPIC_API_KEY is not set")
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+    kwargs: dict = {
+        "model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+        "max_tokens": max_tokens or 8192,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    message = await client.messages.create(**kwargs)
+    return message.content[0].text  # type: ignore[union-attr]
+
+
+async def _call_openai(
+    prompt: str,
+    temperature: float | None,
+    max_tokens: int | None,
+) -> str:
+    """Call OpenAI. Requires OPENAI_API_KEY env var."""
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        raise NotImplementedError("OPENAI_API_KEY is not set")
+    client = openai.AsyncOpenAI(api_key=api_key)
+    kwargs: dict = {
+        "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    response = await client.chat.completions.create(**kwargs)
+    return response.choices[0].message.content or ""
+
+
+async def _call_gemini(
+    prompt: str,
+    temperature: float | None,
+    max_tokens: int | None,
+) -> str:
+    """Call Google Gemini via generativeai. Requires GOOGLE_API_KEY env var."""
+    api_key = os.getenv("GOOGLE_API_KEY", "")
+    if not api_key:
+        raise NotImplementedError("GOOGLE_API_KEY is not set")
+    genai.configure(api_key=api_key)
+    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+    generation_config: dict = {}
+    if temperature is not None:
+        generation_config["temperature"] = temperature
+    if max_tokens is not None:
+        generation_config["max_output_tokens"] = max_tokens
+    gm = genai.GenerativeModel(model_name, generation_config=generation_config or None)
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(None, gm.generate_content, prompt)
+    return response.text
+
+
+async def _call_ollama(
+    prompt: str,
+    temperature: float | None,
+    max_tokens: int | None,
+) -> str:
+    """Call Ollama via OpenAI-compatible API. Requires OLLAMA_BASE_URL env var."""
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    client = openai.AsyncOpenAI(api_key="ollama", base_url=base_url)
+    kwargs: dict = {
+        "model": os.getenv("OLLAMA_MODEL", "llama3"),
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    response = await client.chat.completions.create(**kwargs)
+    return response.choices[0].message.content or ""

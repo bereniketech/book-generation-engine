@@ -95,10 +95,12 @@ class PipelineRunner:
         config: JobConfig,
         supabase: Any,
         progress_callback: Callable[[dict], None],
+        chapter_cursor: int = 0,
     ) -> None:
         self.config = config
         self.supabase = supabase
         self.progress = progress_callback
+        self.chapter_cursor = chapter_cursor
 
         self.llm = LLMClient(
             provider=config.llm_provider,
@@ -140,6 +142,9 @@ class PipelineRunner:
         total = len(chapters_blueprint)
 
         for i, ch_brief in enumerate(chapters_blueprint):
+            if i < self.chapter_cursor:
+                logger.info("Skipping chapter %d (already completed, cursor=%d)", i, self.chapter_cursor)
+                continue
             ctx["chapter_index"] = i
             ctx["chapter_brief"] = ch_brief
             ctx["memory_snapshot"] = self.memory.snapshot()
