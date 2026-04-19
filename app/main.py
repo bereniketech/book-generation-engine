@@ -1,17 +1,21 @@
+import os
 from contextlib import asynccontextmanager
 
 import aio_pika
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.admin import router as admin_router
 from app.api.chapters import router as chapters_router
 from app.api.jobs import router as jobs_router
 from app.config import settings
+from app.core.logging import setup_logging
 from supabase import create_client
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging(log_level=os.getenv("LOG_LEVEL", "INFO"))
     # Startup
     app.state.supabase = create_client(settings.supabase_url, settings.supabase_service_role_key)
     amqp_connection = await aio_pika.connect_robust(settings.rabbitmq_url)
@@ -34,3 +38,4 @@ app.add_middleware(
 
 app.include_router(jobs_router)
 app.include_router(chapters_router)
+app.include_router(admin_router)

@@ -8,7 +8,8 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from app.models.job import JobCreate, JobResponse
 from app.queue.publisher import publish_job
 from app.services import job_service
-from app.ws.manager import manager
+from app.services.progress import get_snapshot, subscribe_progress
+from app.services.token_tracker import get_job_usage
 
 router = APIRouter(prefix="/v1", tags=["jobs"])
 
@@ -42,11 +43,21 @@ async def get_job(job_id: str, request: Request) -> dict:
     return job
 
 
+@router.get("/jobs/{job_id}/tokens")
+async def get_job_tokens(job_id: str) -> dict:
+    return get_job_usage(job_id)
+
+
 @router.websocket("/ws/{job_id}")
 async def websocket_endpoint(websocket: WebSocket, job_id: str) -> None:
-    await manager.connect(job_id, websocket)
+    await websocket.accept()
     try:
-        while True:
-            await websocket.receive_text()  # Keep connection alive; server pushes events
+        # Send the latest snapshot immediately so the client doesn't miss past progress
+        snapshot = await get_snapshot(job_id)
+        if snapshot:
+            await websocket.send_json(snapshot)
+        # Stream live progress events from Redis pub/sub
+        async for event in subscribe_progress(job_id):
+            await websocket.send_json(event)
     except WebSocketDisconnect:
-        manager.disconnect(job_id, websocket)
+        pass
