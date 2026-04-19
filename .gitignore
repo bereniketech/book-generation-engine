@@ -28,5 +28,8 @@ dist/
 
 # Node
 node_modules/
-dist/
-build/
+.next/
+
+# Kit & spec
+.kit/
+.spec/
