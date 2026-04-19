@@ -44,7 +44,10 @@ async def record_usage(
             output_tokens=output_tokens,
         )
     except Exception as exc:
-        log.error("token_usage.record_failed", job_id=job_id, error=str(exc))
+        try:
+            log.error("token_usage.record_failed", job_id=job_id, error=str(exc))
+        except ValueError:
+            pass
 
 
 def get_job_usage(job_id: str) -> dict:

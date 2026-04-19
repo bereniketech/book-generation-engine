@@ -42,9 +42,11 @@ async def process_message(message: aio_pika.IncomingMessage) -> None:
         job_id = body["job_id"]
         config_dict = body["config"]
         chapter_cursor: int = body.get("chapter_cursor", 0)
+        temperature: float | None = body.get("temperature")
+        max_tokens: int | None = body.get("max_tokens")
         logger.info("Processing job %s (chapter_cursor=%d)", job_id, chapter_cursor)
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        config = JobConfig(job_id=job_id, **config_dict)
+        config = JobConfig(job_id=job_id, temperature=temperature, max_tokens=max_tokens, **config_dict)
         loop = asyncio.get_running_loop()
         progress_callback = _make_progress_callback(loop)
         runner = PipelineRunner(

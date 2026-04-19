@@ -295,20 +295,18 @@ async def _call_anthropic(
     temperature: float | None,
     max_tokens: int | None,
 ) -> str:
-    """Call Anthropic Claude. Requires ANTHROPIC_API_KEY env var."""
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise NotImplementedError("ANTHROPIC_API_KEY is not set")
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+    """Call Anthropic API. temperature and max_tokens override defaults when provided."""
+    import anthropic as _anthropic
+    client = _anthropic.AsyncAnthropic()
     kwargs: dict = {
-        "model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-        "max_tokens": max_tokens or 8192,
+        "model": "claude-3-haiku-20240307",
+        "max_tokens": max_tokens if max_tokens is not None else 4096,
         "messages": [{"role": "user", "content": prompt}],
     }
     if temperature is not None:
         kwargs["temperature"] = temperature
-    message = await client.messages.create(**kwargs)
-    return message.content[0].text  # type: ignore[union-attr]
+    response = await client.messages.create(**kwargs)
+    return response.content[0].text
 
 
 async def _call_openai(
@@ -316,13 +314,11 @@ async def _call_openai(
     temperature: float | None,
     max_tokens: int | None,
 ) -> str:
-    """Call OpenAI. Requires OPENAI_API_KEY env var."""
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key:
-        raise NotImplementedError("OPENAI_API_KEY is not set")
-    client = openai.AsyncOpenAI(api_key=api_key)
+    """Call OpenAI API. temperature and max_tokens override defaults when provided."""
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI()
     kwargs: dict = {
-        "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
+        "model": "gpt-4o-mini",
         "messages": [{"role": "user", "content": prompt}],
     }
     if temperature is not None:
@@ -338,20 +334,15 @@ async def _call_gemini(
     temperature: float | None,
     max_tokens: int | None,
 ) -> str:
-    """Call Google Gemini via generativeai. Requires GOOGLE_API_KEY env var."""
-    api_key = os.getenv("GOOGLE_API_KEY", "")
-    if not api_key:
-        raise NotImplementedError("GOOGLE_API_KEY is not set")
-    genai.configure(api_key=api_key)
-    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+    """Call Google Gemini API. temperature and max_tokens override defaults when provided."""
+    import google.generativeai as _genai
     generation_config: dict = {}
     if temperature is not None:
         generation_config["temperature"] = temperature
     if max_tokens is not None:
         generation_config["max_output_tokens"] = max_tokens
-    gm = genai.GenerativeModel(model_name, generation_config=generation_config or None)
-    loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(None, gm.generate_content, prompt)
+    model = _genai.GenerativeModel("gemini-1.5-flash", generation_config=generation_config or None)
+    response = await model.generate_content_async(prompt)
     return response.text
 
 
@@ -360,16 +351,19 @@ async def _call_ollama(
     temperature: float | None,
     max_tokens: int | None,
 ) -> str:
-    """Call Ollama via OpenAI-compatible API. Requires OLLAMA_BASE_URL env var."""
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-    client = openai.AsyncOpenAI(api_key="ollama", base_url=base_url)
-    kwargs: dict = {
+    """Call Ollama local API."""
+    import httpx
+    OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    payload: dict = {
         "model": os.getenv("OLLAMA_MODEL", "llama3"),
-        "messages": [{"role": "user", "content": prompt}],
+        "prompt": prompt,
+        "stream": False,
     }
     if temperature is not None:
-        kwargs["temperature"] = temperature
+        payload["options"] = {"temperature": temperature}
     if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
-    response = await client.chat.completions.create(**kwargs)
-    return response.choices[0].message.content or ""
+        payload.setdefault("options", {})["num_predict"] = max_tokens
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=120.0)
+        response.raise_for_status()
+    return response.json()["response"]

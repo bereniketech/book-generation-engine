@@ -95,7 +95,10 @@ async def create_job_with_template(body: CreateJobRequest, request: Request) -> 
     }).execute()
 
     job_id = result.data[0]["id"]
-    log.info("api.job.created", job_id=job_id, has_template=body.template_id is not None)
+    try:
+        log.info("api.job.created", job_id=job_id, has_template=body.template_id is not None)
+    except ValueError:
+        pass
     return {"id": job_id, "status": "queued"}
 
 

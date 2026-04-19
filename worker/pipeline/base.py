@@ -26,6 +26,8 @@ class JobConfig(BaseModel):
     image_provider: str
     image_api_key: str
     notification_email: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 class BaseEngine(ABC):
