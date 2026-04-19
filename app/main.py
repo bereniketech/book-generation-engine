@@ -9,7 +9,8 @@ from app.api.admin import router as admin_router
 from app.api.batch import router as batch_router
 from app.api.chapters import router as chapters_router
 from app.api.cover import router as cover_router
-from app.api.jobs import router as jobs_router
+from app.api.jobs import router as jobs_router, jobs_router as jobs_base_router
+from app.api.templates import router as templates_router
 from app.config import settings
 from app.core.logging import setup_logging
 from supabase import create_client
@@ -39,7 +40,9 @@ app.add_middleware(
 )
 
 app.include_router(jobs_router)
+app.include_router(jobs_base_router)
 app.include_router(chapters_router)
 app.include_router(admin_router)
 app.include_router(batch_router)
 app.include_router(cover_router)
+app.include_router(templates_router)

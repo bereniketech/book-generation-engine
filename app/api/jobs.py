@@ -5,6 +5,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
+from pydantic import BaseModel
 
 from app.core.logging import get_logger
 from app.models.job import JobCreate, JobResponse
@@ -16,8 +17,15 @@ from app.services.token_tracker import get_job_usage
 log = get_logger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["jobs"])
+jobs_router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 TERMINAL_STATES = {"complete", "cancelled"}
+
+
+class CreateJobRequest(BaseModel):
+    config: dict = {}
+    template_id: str | None = None
+    notification_email: str | None = None
 
 
 def _get_job_or_404(supabase, job_id: str) -> dict:
@@ -28,6 +36,14 @@ def _get_job_or_404(supabase, job_id: str) -> dict:
             detail={"error": "Job not found", "code": "JOB_NOT_FOUND"},
         )
     return result.data
+
+
+def _client():
+    import os
+    from supabase import create_client
+    url = os.getenv("SUPABASE_URL", "")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    return create_client(url, key)
 
 
 @router.post("/jobs", status_code=status.HTTP_201_CREATED, response_model=JobResponse)
@@ -48,6 +64,39 @@ async def create_job(body: JobCreate, request: Request) -> JobResponse:
 
     base_url = str(request.base_url).rstrip("/")
     return JobResponse.from_job_id(job_id, base_url)
+
+
+@jobs_router.post("", status_code=status.HTTP_201_CREATED)
+async def create_job_with_template(body: CreateJobRequest, request: Request) -> dict:
+    """Submit a new job, optionally merging a template config."""
+    config = dict(body.config)
+
+    if body.template_id:
+        template_result = (
+            _client()
+            .table("job_templates")
+            .select("config")
+            .eq("id", body.template_id)
+            .single()
+            .execute()
+        )
+        if not template_result.data:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "Template not found", "code": "TEMPLATE_NOT_FOUND"},
+            )
+        merged = {**template_result.data["config"], **config}
+        config = merged
+
+    result = _client().table("jobs").insert({
+        "config": config,
+        "status": "queued",
+        "notification_email": body.notification_email,
+    }).execute()
+
+    job_id = result.data[0]["id"]
+    log.info("api.job.created", job_id=job_id, has_template=body.template_id is not None)
+    return {"id": job_id, "status": "queued"}
 
 
 @router.get("/jobs/{job_id}")

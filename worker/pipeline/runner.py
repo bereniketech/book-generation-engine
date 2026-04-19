@@ -25,6 +25,7 @@ from worker.pipeline.fiction_path import (
     StructureEngine,
     ThemeEngine,
 )
+from worker.pipeline.chapter_lock import compute_and_store_readability
 from worker.pipeline.generation import (
     ChapterGeneratorEngine,
     ContinuityEngine,
@@ -166,6 +167,12 @@ class PipelineRunner:
                     locked_chapters.append(ch_record)
                     self._save_chapter(
                         i, ch_record["title"], ctx["generated_content"], "locked"
+                    )
+                    compute_and_store_readability(
+                        self.supabase,
+                        self.config.job_id,
+                        i,
+                        ctx["generated_content"],
                     )
                     locked = True
                     break
