@@ -1,13 +1,16 @@
 """FastAPI routes for jobs and WebSocket."""
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Query, Request, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, Query, Request, Response, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
+from supabase import Client
 
-from app.core.logging import get_logger
+from app.api.deps import get_supabase
+from app.core.logging import get_logger, safe_log
 from app.domain.state_machine import InvalidStateTransitionError as DomainInvalidStateTransitionError
 from app.domain.state_machine import job_state_machine
 from app.infrastructure.http_exceptions import (
@@ -16,7 +19,6 @@ from app.infrastructure.http_exceptions import (
     TemplateNotFoundError,
 )
 from app.infrastructure.security import redact_sensitive_fields
-from app.infrastructure.supabase_client import get_supabase_client
 from app.domain.validation_schemas import JobCreateRequest
 from app.models.job import JobCreate, JobResponse
 from app.queue.publisher import publish_job
@@ -36,17 +38,19 @@ class CreateJobRequest(BaseModel):
     notification_email: str | None = None
 
 
-def _get_job_or_404(supabase, job_id: str) -> dict:
+def _get_job_or_404(supabase: Client, job_id: str) -> dict:
     result = supabase.table("jobs").select("*").eq("id", job_id).single().execute()
     if not result.data:
         raise JobNotFoundError(job_id)
     return result.data
 
 
-
 @router.post("/jobs", status_code=status.HTTP_201_CREATED, response_model=JobResponse)
-async def create_job(body: JobCreateRequest, request: Request) -> JobResponse:
-    supabase = request.app.state.supabase
+async def create_job(
+    body: JobCreateRequest,
+    request: Request,
+    supabase: Client = Depends(get_supabase),
+) -> JobResponse:
     channel = request.app.state.amqp_channel
 
     job_id = str(uuid.uuid4())
@@ -65,13 +69,16 @@ async def create_job(body: JobCreateRequest, request: Request) -> JobResponse:
 
 
 @jobs_router.post("", status_code=status.HTTP_201_CREATED)
-async def create_job_with_template(body: CreateJobRequest, request: Request) -> dict:
+async def create_job_with_template(
+    body: CreateJobRequest,
+    supabase: Client = Depends(get_supabase),
+) -> dict:
     """Submit a new job, optionally merging a template config."""
     config = dict(body.config)
 
     if body.template_id:
         template_result = (
-            get_supabase_client()
+            supabase
             .table("job_templates")
             .select("config")
             .eq("id", body.template_id)
@@ -83,23 +90,22 @@ async def create_job_with_template(body: CreateJobRequest, request: Request) -> 
         merged = {**template_result.data["config"], **config}
         config = merged
 
-    result = get_supabase_client().table("jobs").insert({
+    result = supabase.table("jobs").insert({
         "config": config,
         "status": "queued",
         "notification_email": body.notification_email,
     }).execute()
 
     job_id = result.data[0]["id"]
-    try:
-        log.info("api.job.created", job_id=job_id, has_template=body.template_id is not None)
-    except ValueError:
-        pass
+    safe_log(logging.INFO, "api.job.created", job_id=job_id, has_template=body.template_id is not None)
     return {"id": job_id, "status": "queued"}
 
 
 @router.get("/jobs/{job_id}")
-async def get_job(job_id: str, request: Request) -> dict:
-    supabase = request.app.state.supabase
+async def get_job(
+    job_id: str,
+    supabase: Client = Depends(get_supabase),
+) -> dict:
     job = job_service.get_job(supabase, job_id)
     if job is None:
         raise JobNotFoundError(job_id)
@@ -107,21 +113,22 @@ async def get_job(job_id: str, request: Request) -> dict:
 
 
 @router.get("/jobs/{job_id}/tokens")
-async def get_job_tokens(job_id: str, request: Request) -> dict:
-    supabase = request.app.state.supabase
+async def get_job_tokens(
+    job_id: str,
+    supabase: Client = Depends(get_supabase),
+) -> dict:
     _get_job_or_404(supabase, job_id)
     return get_job_usage(job_id)
 
 
 @router.get("/jobs")
 async def list_jobs(
-    request: Request,
+    supabase: Client = Depends(get_supabase),
     status: Optional[str] = Query(default=None),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> dict:
     """List jobs with optional status filter and pagination."""
-    supabase = request.app.state.supabase
     offset = (page - 1) * limit
     query = supabase.table("jobs").select(
         "id,status,created_at,updated_at,config", count="exact"
@@ -138,9 +145,11 @@ async def list_jobs(
 
 
 @router.patch("/jobs/{job_id}/pause")
-async def pause_job(job_id: str, request: Request) -> dict:
+async def pause_job(
+    job_id: str,
+    supabase: Client = Depends(get_supabase),
+) -> dict:
     """Pause a running job. Returns 409 if the transition is not allowed."""
-    supabase = request.app.state.supabase
     job = _get_job_or_404(supabase, job_id)
     try:
         job_state_machine.validate_transition(job["status"], "paused")
@@ -156,9 +165,11 @@ async def pause_job(job_id: str, request: Request) -> dict:
 
 
 @router.patch("/jobs/{job_id}/resume")
-async def resume_job(job_id: str, request: Request) -> dict:
+async def resume_job(
+    job_id: str,
+    supabase: Client = Depends(get_supabase),
+) -> dict:
     """Resume a paused job by setting status back to queued. Returns 409 if not allowed."""
-    supabase = request.app.state.supabase
     job = _get_job_or_404(supabase, job_id)
     try:
         job_state_machine.validate_transition(job["status"], "queued")
@@ -174,9 +185,11 @@ async def resume_job(job_id: str, request: Request) -> dict:
 
 
 @router.delete("/jobs/{job_id}", status_code=204)
-async def cancel_job(job_id: str, request: Request) -> Response:
+async def cancel_job(
+    job_id: str,
+    supabase: Client = Depends(get_supabase),
+) -> Response:
     """Cancel a job. Returns 204 No Content."""
-    supabase = request.app.state.supabase
     _get_job_or_404(supabase, job_id)
     supabase.table("jobs").update({"status": "cancelled"}).eq("id", job_id).execute()
     log.info("api.job.cancelled", job_id=job_id)
@@ -184,9 +197,11 @@ async def cancel_job(job_id: str, request: Request) -> Response:
 
 
 @router.post("/jobs/{job_id}/restart", status_code=201)
-async def restart_job(job_id: str, request: Request) -> dict:
+async def restart_job(
+    job_id: str,
+    supabase: Client = Depends(get_supabase),
+) -> dict:
     """Create a new queued job cloned from the given job's config."""
-    supabase = request.app.state.supabase
     job = _get_job_or_404(supabase, job_id)
     new_job = supabase.table("jobs").insert(
         {

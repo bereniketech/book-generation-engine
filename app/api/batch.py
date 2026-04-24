@@ -10,12 +10,13 @@ import uuid
 from typing import Any
 
 import aio_pika
-from fastapi import APIRouter, Body, UploadFile, File
+from fastapi import APIRouter, Body, Depends, UploadFile, File
 from pydantic import BaseModel, ValidationError
+from supabase import Client
 
+from app.api.deps import get_supabase
 from app.core.logging import get_logger
 from app.infrastructure.http_exceptions import EmptyBatchError
-from app.infrastructure.supabase_client import get_supabase_client
 
 log = get_logger(__name__)
 
@@ -37,10 +38,10 @@ class BatchJsonRequest(BaseModel):
     jobs: list[dict[str, Any]]
 
 
-async def _active_job_count() -> int:
+async def _active_job_count(supabase: Client) -> int:
     """Count jobs currently queued or generating."""
     result = (
-        get_supabase_client()
+        supabase
         .table("jobs")
         .select("id", count="exact")
         .in_("status", ["queued", "generating"])
@@ -62,12 +63,14 @@ async def _enqueue_job(channel: aio_pika.abc.AbstractChannel, job_id: str, confi
 
 
 @router.post("")
-async def submit_batch(request: BatchJsonRequest = Body(...)):
+async def submit_batch(
+    request: BatchJsonRequest = Body(...),
+    supabase: Client = Depends(get_supabase),
+):
     """Submit a batch of jobs from a JSON payload."""
     batch_id = str(uuid.uuid4())
     job_ids: list[str] = []
     errors: list[dict] = []
-    client = get_supabase_client()
 
     connection = await aio_pika.connect_robust(RABBITMQ_URL)
     channel = await connection.channel()
@@ -83,12 +86,12 @@ async def submit_batch(request: BatchJsonRequest = Body(...)):
                 continue
 
             # Throttle: wait if too many active jobs
-            while await _active_job_count() >= MAX_PARALLEL_JOBS:
-                log.info("batch.throttle.waiting", batch_id=batch_id, active=await _active_job_count())
+            while await _active_job_count(supabase) >= MAX_PARALLEL_JOBS:
+                log.info("batch.throttle.waiting", batch_id=batch_id, active=await _active_job_count(supabase))
                 await asyncio.sleep(BATCH_THROTTLE_DELAY)
 
             # Insert job record
-            job_result = client.table("jobs").insert({
+            job_result = supabase.table("jobs").insert({
                 "config": config,
                 "status": "queued",
                 "batch_id": batch_id,
@@ -116,11 +119,14 @@ async def submit_batch(request: BatchJsonRequest = Body(...)):
 
 
 @router.post("/csv")
-async def submit_batch_csv(file: UploadFile = File(...)):
+async def submit_batch_csv(
+    file: UploadFile = File(...),
+    supabase: Client = Depends(get_supabase),
+):
     """Submit a batch of jobs from a CSV file upload."""
     contents = await file.read()
     text = contents.decode("utf-8")
     reader = csv.DictReader(io.StringIO(text))
     jobs = [dict(row) for row in reader]
 
-    return await submit_batch(BatchJsonRequest(format="csv", jobs=jobs))
+    return await submit_batch(BatchJsonRequest(format="csv", jobs=jobs), supabase)

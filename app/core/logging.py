@@ -3,8 +3,42 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import Any
 
 import structlog
+
+
+_KNOWN_LEVELS: frozenset[str] = frozenset({"debug", "info", "warning", "error", "critical"})
+
+
+def safe_log(level: int, event: str, **kwargs: Any) -> None:
+    """Emit a structured log entry without ever raising.
+
+    Uses the module-level structlog bound logger internally.  All
+    kwargs are forwarded as structured fields.  If the underlying
+    logger raises for any reason (e.g. a non-serialisable value in a
+    ``structlog`` context, a ``ValueError`` from the bound-logger
+    wrapper, or any other exception) the failure is silently swallowed
+    so that a logging error can never interrupt business logic.
+
+    Args:
+        level: A :mod:`logging` level constant (e.g. ``logging.INFO``).
+        event: The event name / message string.
+        **kwargs: Arbitrary structured fields forwarded to the logger.
+    """
+    try:
+        _log = structlog.get_logger(__name__)
+        # structlog bound loggers expose level methods by name, not by
+        # integer constant.  Translate the integer to a lowercase name and
+        # validate it is a known structlog method before calling it.
+        method_name = logging.getLevelName(level).lower()
+        if method_name not in _KNOWN_LEVELS:
+            # Unknown level — fall back to info so we still emit something.
+            method_name = "info"
+        log_method = getattr(_log, method_name)
+        log_method(event, **kwargs)
+    except Exception:  # noqa: BLE001 — intentionally broad; logging must never raise
+        pass
 
 
 def setup_logging(log_level: str = "INFO") -> None:

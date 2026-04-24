@@ -4,8 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api.deps import get_supabase
 
-client = TestClient(app)
+
+def _make_client(mock_supabase: MagicMock) -> TestClient:
+    """Create a TestClient with the supabase dependency overridden."""
+    app.dependency_overrides[get_supabase] = lambda: mock_supabase
+    return TestClient(app)
 
 
 def test_batch_submit_json_valid_jobs():
@@ -19,8 +24,8 @@ def test_batch_submit_json_valid_jobs():
     mock_exchange = AsyncMock()
     mock_channel.get_exchange.return_value = mock_exchange
 
-    with patch("app.api.batch.get_supabase_client", return_value=mock_supabase), \
-         patch("aio_pika.connect_robust", return_value=mock_connection):
+    client = _make_client(mock_supabase)
+    with patch("aio_pika.connect_robust", return_value=mock_connection):
         resp = client.post("/batch", json={
             "format": "json",
             "jobs": [{"title": "Book One", "genre": "fiction"}, {"title": "Book Two", "genre": "non-fiction"}]
@@ -44,8 +49,8 @@ def test_batch_submit_invalid_row_skipped():
     mock_exchange = AsyncMock()
     mock_channel.get_exchange.return_value = mock_exchange
 
-    with patch("app.api.batch.get_supabase_client", return_value=mock_supabase), \
-         patch("aio_pika.connect_robust", return_value=mock_connection):
+    client = _make_client(mock_supabase)
+    with patch("aio_pika.connect_robust", return_value=mock_connection):
         resp = client.post("/batch", json={
             "format": "json",
             "jobs": [
@@ -70,8 +75,8 @@ def test_batch_all_invalid_returns_422():
     mock_channel = AsyncMock()
     mock_connection.channel.return_value = mock_channel
 
-    with patch("app.api.batch.get_supabase_client", return_value=mock_supabase), \
-         patch("aio_pika.connect_robust", return_value=mock_connection):
+    client = _make_client(mock_supabase)
+    with patch("aio_pika.connect_robust", return_value=mock_connection):
         resp = client.post("/batch", json={
             "format": "json",
             "jobs": [{"bad": "no title"}, {"also_bad": "missing"}]

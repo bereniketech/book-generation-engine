@@ -1,10 +1,11 @@
 """LLM token usage tracking — async insert and query."""
 from __future__ import annotations
 
+import logging
 import os
 from supabase import create_client, Client
 
-from app.core.logging import get_logger
+from app.core.logging import get_logger, safe_log
 
 log = get_logger(__name__)
 
@@ -44,10 +45,7 @@ async def record_usage(
             output_tokens=output_tokens,
         )
     except Exception as exc:
-        try:
-            log.error("token_usage.record_failed", job_id=job_id, error=str(exc))
-        except ValueError:
-            pass
+        safe_log(logging.ERROR, "token_usage.record_failed", job_id=job_id, error=str(exc))
 
 
 def get_job_usage(job_id: str) -> dict:

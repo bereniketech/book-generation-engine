@@ -3,6 +3,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
+from app.main import app
+from app.api.deps import get_supabase
+
 
 def _mock_job(status: str = "generating") -> dict:
     return {
@@ -15,18 +18,16 @@ def _mock_job(status: str = "generating") -> dict:
     }
 
 
-def _make_client():
-    """Create a TestClient with mocked lifespan dependencies."""
-    from app.main import app
-
-    # Provide stub state so lifespan is not required
-    app.state.supabase = MagicMock()
+def _make_client(mock_supabase: MagicMock) -> TestClient:
+    """Create a TestClient with the supabase dependency overridden."""
+    app.dependency_overrides[get_supabase] = lambda: mock_supabase
+    # amqp_channel stub still needed for create_job (uses request.app.state)
     app.state.amqp_channel = MagicMock()
     app.state.amqp_connection = MagicMock()
     return TestClient(app, raise_server_exceptions=True)
 
 
-def _mock_supabase(job_data=None, insert_data=None):
+def _mock_supabase(job_data=None, insert_data=None) -> MagicMock:
     """Build a MagicMock supabase client with configurable responses."""
     mock = MagicMock()
     # select().eq().single().execute().data
@@ -45,27 +46,24 @@ def _mock_supabase(job_data=None, insert_data=None):
 
 
 def test_pause_job_returns_200():
-    client = _make_client()
     mock_sb = _mock_supabase(job_data=_mock_job("generating"))
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.patch("/v1/jobs/job-1/pause")
     assert resp.status_code == 200
     assert resp.json()["status"] == "paused"
 
 
 def test_pause_job_on_complete_returns_409():
-    client = _make_client()
     mock_sb = _mock_supabase(job_data=_mock_job("complete"))
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.patch("/v1/jobs/job-1/pause")
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "INVALID_STATE_TRANSITION"
 
 
 def test_pause_job_on_cancelled_returns_409():
-    client = _make_client()
     mock_sb = _mock_supabase(job_data=_mock_job("cancelled"))
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.patch("/v1/jobs/job-1/pause")
     assert resp.status_code == 409
 
@@ -76,9 +74,8 @@ def test_pause_job_on_cancelled_returns_409():
 
 
 def test_resume_job_returns_200():
-    client = _make_client()
     mock_sb = _mock_supabase(job_data=_mock_job("paused"))
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.patch("/v1/jobs/job-1/resume")
     assert resp.status_code == 200
     assert resp.json()["status"] == "queued"
@@ -90,9 +87,8 @@ def test_resume_job_returns_200():
 
 
 def test_cancel_job_returns_204():
-    client = _make_client()
     mock_sb = _mock_supabase(job_data=_mock_job("generating"))
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.delete("/v1/jobs/job-1")
     assert resp.status_code == 204
 
@@ -103,9 +99,8 @@ def test_cancel_job_returns_204():
 
 
 def test_get_job_not_found_returns_404():
-    client = _make_client()
     mock_sb = _mock_supabase(job_data=None)
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.patch("/v1/jobs/bad-id/pause")
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "JOB_NOT_FOUND"
@@ -117,12 +112,11 @@ def test_get_job_not_found_returns_404():
 
 
 def test_restart_job_returns_201_with_new_job_id():
-    client = _make_client()
     mock_sb = _mock_supabase(
         job_data=_mock_job("failed"),
         insert_data=[{"id": "new-job-id"}],
     )
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.post("/v1/jobs/job-1/restart")
     assert resp.status_code == 201
     assert resp.json()["new_job_id"] == "new-job-id"
@@ -135,11 +129,9 @@ def test_restart_job_returns_201_with_new_job_id():
 
 def test_get_job_not_found_returns_structured_error():
     """get_job must return {error, code} not a plain string."""
-    client = _make_client()
     mock_sb = MagicMock()
-    # job_service.get_job returns None when job is absent
+    client = _make_client(mock_sb)
     with patch("app.api.jobs.job_service.get_job", return_value=None):
-        client.app.state.supabase = mock_sb
         resp = client.get("/v1/jobs/missing-id")
     assert resp.status_code == 404
     body = resp.json()
@@ -150,9 +142,8 @@ def test_get_job_not_found_returns_structured_error():
 
 def test_pause_job_structured_error_has_valid_transitions():
     """State transition 409 must include valid_transitions field."""
-    client = _make_client()
     mock_sb = _mock_supabase(job_data=_mock_job("complete"))
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.patch("/v1/jobs/job-1/pause")
     assert resp.status_code == 409
     body = resp.json()
@@ -167,10 +158,8 @@ def test_pause_job_structured_error_has_valid_transitions():
 
 
 def test_list_jobs_returns_jobs_dict():
-    client = _make_client()
     mock_sb = MagicMock()
     jobs = [_mock_job("generating"), _mock_job("complete")]
-    # Chain for list: select().eq().order().range().execute()
     list_result = MagicMock()
     list_result.data = jobs
     list_result.count = 2
@@ -181,7 +170,7 @@ def test_list_jobs_returns_jobs_dict():
         .range.return_value
         .execute.return_value
     ) = list_result
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.get("/v1/jobs")
     assert resp.status_code == 200
     body = resp.json()
@@ -192,12 +181,10 @@ def test_list_jobs_returns_jobs_dict():
 
 
 def test_list_jobs_with_status_filter():
-    client = _make_client()
     mock_sb = MagicMock()
     list_result = MagicMock()
     list_result.data = [_mock_job("generating")]
     list_result.count = 1
-    # When status filter is applied, the chain includes an extra .eq() call
     (
         mock_sb.table.return_value
         .select.return_value
@@ -206,7 +193,7 @@ def test_list_jobs_with_status_filter():
         .range.return_value
         .execute.return_value
     ) = list_result
-    client.app.state.supabase = mock_sb
+    client = _make_client(mock_sb)
     resp = client.get("/v1/jobs?status=generating")
     assert resp.status_code == 200
     body = resp.json()

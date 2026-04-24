@@ -2,67 +2,53 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-
-interface Chapter {
-  index: number;
-  status: string;
-  qa_score: number | null;
-  content_preview: string;
-}
-
-interface ChapterDetail {
-  index: number;
-  content: string;
-  status: string;
-  qa_score: number | null;
-  flesch_kincaid_grade: number | null;
-  flesch_reading_ease: number | null;
-}
+import { listChapters, getChapter, updateChapter, type ChapterSummary, type ChapterDetail } from "@/lib/api";
 
 export default function ChapterEditorPage() {
   const { id: jobId } = useParams<{ id: string }>();
-  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [chapters, setChapters] = useState<ChapterSummary[]>([]);
   const [selected, setSelected] = useState<ChapterDetail | null>(null);
   const [editContent, setEditContent] = useState("");
   const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
   useEffect(() => {
-    fetch(`${apiBase}/jobs/${jobId}/chapters`)
-      .then((r) => r.json())
+    listChapters(jobId)
       .then((data) => {
-        setChapters(data.chapters ?? []);
+        setChapters(data.chapters);
+        setLoading(false);
+      })
+      .catch(() => {
         setLoading(false);
       });
-  }, [jobId, apiBase]);
+  }, [jobId]);
 
   const selectChapter = async (index: number) => {
-    const resp = await fetch(`${apiBase}/jobs/${jobId}/chapters/${index}`);
-    const data: ChapterDetail = await resp.json();
-    setSelected(data);
-    setEditContent(data.content);
+    try {
+      const data = await getChapter(jobId, index);
+      setSelected(data);
+      setEditContent(data.content);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load chapter";
+      setToast(`Error: ${message}`);
+      setTimeout(() => setToast(""), 4000);
+    }
   };
 
   const saveChapter = async () => {
     if (!selected) return;
-    const resp = await fetch(`${apiBase}/jobs/${jobId}/chapters/${selected.index}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: editContent }),
-    });
-    if (resp.ok) {
+    try {
+      await updateChapter(jobId, selected.index, editContent);
       setToast("Chapter saved and locked.");
       setChapters((prev) =>
         prev.map((ch) =>
           ch.index === selected.index ? { ...ch, status: "locked" } : ch
         )
       );
-      setSelected((prev) => prev ? { ...prev, status: "locked" } : prev);
-    } else {
-      const err = await resp.json();
-      setToast(`Error: ${err?.detail?.error ?? "Save failed"}`);
+      setSelected((prev) => (prev ? { ...prev, status: "locked" } : prev));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Save failed";
+      setToast(`Error: ${message}`);
     }
     setTimeout(() => setToast(""), 4000);
   };

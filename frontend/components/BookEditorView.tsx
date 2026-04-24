@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChapterCard } from "./ChapterCard";
 import { ProgressBar } from "./ProgressBar";
 import { StatusBadge } from "./StatusBadge";
-import { getChapters } from "@/lib/api";
+import { listChapters, type ChapterSummary } from "@/lib/api";
 import { useWebSocket } from "@/hooks/useWebSocket";
 
 interface Props {
@@ -12,7 +12,7 @@ interface Props {
 }
 
 export function BookEditorView({ jobId }: Props) {
-  const [chapters, setChapters] = useState<Record<string, unknown>[]>([]);
+  const [chapters, setChapters] = useState<ChapterSummary[]>([]);
   const [progress, setProgress] = useState(0);
   const [step, setStep] = useState("Initialising...");
   const [status, setStatus] = useState("queued");
@@ -20,8 +20,8 @@ export function BookEditorView({ jobId }: Props) {
 
   const fetchChapters = useCallback(async () => {
     try {
-      const data = await getChapters(jobId);
-      setChapters(data);
+      const data = await listChapters(jobId);
+      setChapters(data.chapters);
     } catch {
       // Chapters may not exist yet during planning phase
     }
@@ -33,9 +33,9 @@ export function BookEditorView({ jobId }: Props) {
 
   useEffect(() => {
     if (!latestEvent) return;
-    if (latestEvent.progress !== undefined) setProgress(latestEvent.progress);
-    if (latestEvent.step) setStep(latestEvent.step);
-    if (latestEvent.status) setStatus(latestEvent.status);
+    if (latestEvent.progress !== undefined) setProgress(latestEvent.progress as number);
+    if (latestEvent.step) setStep(latestEvent.step as string);
+    if (latestEvent.status) setStatus(latestEvent.status as string);
     if (latestEvent.type === "chapter_ready") {
       fetchChapters();
     }
@@ -61,8 +61,17 @@ export function BookEditorView({ jobId }: Props) {
       )}
 
       <div className="space-y-4">
-        {(chapters as Array<{ id: string; index: number; title?: string; content: string; status: string }>).map((ch) => (
-          <ChapterCard key={ch.id} chapter={ch} onUpdate={fetchChapters} />
+        {chapters.map((ch) => (
+          <ChapterCard
+            key={ch.index}
+            jobId={jobId}
+            chapter={{
+              index: ch.index,
+              content: ch.content_preview,
+              status: ch.status,
+            }}
+            onUpdate={fetchChapters}
+          />
         ))}
       </div>
 

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from supabase import Client
 
+from app.api.deps import get_supabase
 from app.core.logging import get_logger
 from app.domain.state_machine import InvalidStateTransitionError as DomainInvalidStateTransitionError
 from app.domain.state_machine import cover_state_machine
@@ -12,15 +14,21 @@ from app.infrastructure.http_exceptions import (
     JobNotFoundError,
 )
 from app.infrastructure.security import redact_sensitive_fields
-from app.infrastructure.supabase_client import get_supabase_client
 
 log = get_logger(__name__)
 
 router = APIRouter(prefix="/jobs", tags=["cover"])
 
 
-def _get_job_or_404(job_id: str) -> dict:
-    result = get_supabase_client().table("jobs").select("id,status,cover_status,cover_url,config").eq("id", job_id).single().execute()
+def _get_job_or_404(supabase: Client, job_id: str) -> dict:
+    result = (
+        supabase
+        .table("jobs")
+        .select("id,status,cover_status,cover_url,config")
+        .eq("id", job_id)
+        .single()
+        .execute()
+    )
     if not result.data:
         raise JobNotFoundError(job_id)
     return result.data
@@ -44,8 +52,11 @@ class ReviseRequest(BaseModel):
 
 
 @router.get("/{job_id}/cover")
-async def get_cover(job_id: str):
-    job = _get_job_or_404(job_id)
+async def get_cover(
+    job_id: str,
+    supabase: Client = Depends(get_supabase),
+):
+    job = _get_job_or_404(supabase, job_id)
     return redact_sensitive_fields({
         "job_id": job_id,
         "cover_url": job.get("cover_url"),
@@ -54,10 +65,13 @@ async def get_cover(job_id: str):
 
 
 @router.post("/{job_id}/cover/approve")
-async def approve_cover(job_id: str):
-    job = _get_job_or_404(job_id)
+async def approve_cover(
+    job_id: str,
+    supabase: Client = Depends(get_supabase),
+):
+    job = _get_job_or_404(supabase, job_id)
     _validate_cover_transition(job, "approved")
-    get_supabase_client().table("jobs").update({
+    supabase.table("jobs").update({
         "cover_status": "approved",
         "status": "assembling",
     }).eq("id", job_id).execute()
@@ -66,12 +80,16 @@ async def approve_cover(job_id: str):
 
 
 @router.post("/{job_id}/cover/revise")
-async def revise_cover(job_id: str, body: ReviseRequest):
-    job = _get_job_or_404(job_id)
+async def revise_cover(
+    job_id: str,
+    body: ReviseRequest,
+    supabase: Client = Depends(get_supabase),
+):
+    job = _get_job_or_404(supabase, job_id)
     _validate_cover_transition(job, "revising")
     config = dict(job.get("config") or {})
     config["cover_revision_feedback"] = body.feedback
-    get_supabase_client().table("jobs").update({
+    supabase.table("jobs").update({
         "cover_status": "revising",
         "status": "generating",
         "config": config,

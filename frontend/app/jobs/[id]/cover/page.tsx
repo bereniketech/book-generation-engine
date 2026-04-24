@@ -2,39 +2,36 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-
-interface CoverData {
-  job_id: string;
-  cover_url: string | null;
-  cover_status: string | null;
-}
+import { getCover, approveCover, reviseCover, type CoverResponse } from "@/lib/api";
 
 export default function CoverApprovalPage() {
   const { id: jobId } = useParams<{ id: string }>();
-  const [cover, setCover] = useState<CoverData | null>(null);
+  const [cover, setCover] = useState<CoverResponse | null>(null);
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState("");
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
   useEffect(() => {
-    fetch(`${apiBase}/jobs/${jobId}/cover`)
-      .then((r) => r.json())
-      .then((data: CoverData) => {
+    getCover(jobId)
+      .then((data) => {
         setCover(data);
         setLoading(false);
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "Failed to load cover";
+        setActionMsg(`Error: ${message}`);
+        setLoading(false);
       });
-  }, [jobId, apiBase]);
+  }, [jobId]);
 
   const approve = async () => {
-    const resp = await fetch(`${apiBase}/jobs/${jobId}/cover/approve`, { method: "POST" });
-    if (resp.ok) {
+    try {
+      await approveCover(jobId);
       setActionMsg("Cover approved. Final assembly started.");
-      setCover((prev) => prev ? { ...prev, cover_status: "approved" } : prev);
-    } else {
-      const err = await resp.json();
-      setActionMsg(`Error: ${err?.detail?.error ?? resp.statusText}`);
+      setCover((prev) => (prev ? { ...prev, cover_status: "approved" } : prev));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Approval failed";
+      setActionMsg(`Error: ${message}`);
     }
   };
 
@@ -43,17 +40,13 @@ export default function CoverApprovalPage() {
       setActionMsg("Please enter revision feedback before submitting.");
       return;
     }
-    const resp = await fetch(`${apiBase}/jobs/${jobId}/cover/revise`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ feedback }),
-    });
-    if (resp.ok) {
+    try {
+      await reviseCover(jobId, feedback);
       setActionMsg("Revision requested. New cover will be generated.");
-      setCover((prev) => prev ? { ...prev, cover_status: "revising" } : prev);
-    } else {
-      const err = await resp.json();
-      setActionMsg(`Error: ${err?.detail?.error ?? resp.statusText}`);
+      setCover((prev) => (prev ? { ...prev, cover_status: "revising" } : prev));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Revision request failed";
+      setActionMsg(`Error: ${message}`);
     }
   };
 
@@ -65,7 +58,9 @@ export default function CoverApprovalPage() {
   return (
     <div className="max-w-2xl mx-auto p-8">
       <h1 className="text-2xl font-bold mb-4">Cover Review — Job {jobId}</h1>
-      <p className="text-sm text-gray-500 mb-4">Status: <strong>{cover.cover_status ?? "unknown"}</strong></p>
+      <p className="text-sm text-gray-500 mb-4">
+        Status: <strong>{cover.cover_status ?? "unknown"}</strong>
+      </p>
 
       <img
         src={cover.cover_url}

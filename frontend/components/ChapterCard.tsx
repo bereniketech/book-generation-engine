@@ -3,10 +3,9 @@
 import { useState } from "react";
 import { InlineEditor } from "./InlineEditor";
 import { StatusBadge } from "./StatusBadge";
-import { lockChapter, regenerateChapter, updateChapter } from "@/lib/api";
+import { updateChapter } from "@/lib/api";
 
 interface Chapter {
-  id: string;
   index: number;
   title?: string;
   content: string;
@@ -14,39 +13,18 @@ interface Chapter {
 }
 
 interface Props {
+  jobId: string;
   chapter: Chapter;
   onUpdate: () => void;
 }
 
-export function ChapterCard({ chapter, onUpdate }: Props) {
-  const [regenerating, setRegenerating] = useState(false);
-  const [locking, setLocking] = useState(false);
-
+export function ChapterCard({ jobId, chapter, onUpdate }: Props) {
   const isLocked = chapter.status === "locked";
 
   const handleSave = async (content: string) => {
     if (isLocked) return;
-    await updateChapter(chapter.id, content);
-  };
-
-  const handleRegenerate = async () => {
-    setRegenerating(true);
-    try {
-      await regenerateChapter(chapter.id);
-      setTimeout(onUpdate, 3000);
-    } finally {
-      setRegenerating(false);
-    }
-  };
-
-  const handleLock = async () => {
-    setLocking(true);
-    try {
-      await lockChapter(chapter.id);
-      onUpdate();
-    } finally {
-      setLocking(false);
-    }
+    await updateChapter(jobId, chapter.index, content);
+    onUpdate();
   };
 
   return (
@@ -64,29 +42,9 @@ export function ChapterCard({ chapter, onUpdate }: Props) {
         disabled={isLocked}
       />
 
-      <div className="flex gap-2">
-        {!isLocked && (
-          <button
-            onClick={handleRegenerate}
-            disabled={regenerating}
-            className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 transition-colors"
-          >
-            {regenerating ? "Regenerating..." : "Regenerate"}
-          </button>
-        )}
-        {!isLocked && (
-          <button
-            onClick={handleLock}
-            disabled={locking}
-            className="px-3 py-1.5 text-sm bg-green-700 hover:bg-green-600 text-white rounded disabled:opacity-50 transition-colors"
-          >
-            {locking ? "Locking..." : "Lock"}
-          </button>
-        )}
-        {isLocked && (
-          <span className="text-xs text-green-400 self-center">Chapter locked — editing disabled</span>
-        )}
-      </div>
+      {isLocked && (
+        <span className="text-xs text-green-400 self-center">Chapter locked — editing disabled</span>
+      )}
     </div>
   );
 }
