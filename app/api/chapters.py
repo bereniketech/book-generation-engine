@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.core.logging import get_logger
 from app.infrastructure.http_exceptions import ChapterNotFoundError
+from app.infrastructure.security import redact_sensitive_fields
 from app.infrastructure.supabase_client import get_supabase_client
 
 log = get_logger(__name__)
@@ -29,12 +30,12 @@ async def list_chapters(job_id: str):
         .execute()
     )
     chapters = [
-        {
+        redact_sensitive_fields({
             "index": ch["index"],
             "status": ch["status"],
             "qa_score": ch.get("qa_score"),
             "content_preview": (ch.get("content") or "")[:200],
-        }
+        })
         for ch in result.data
     ]
     return {"chapters": chapters}
@@ -54,7 +55,7 @@ async def get_chapter(job_id: str, index: int):
     )
     if not result.data:
         raise ChapterNotFoundError(job_id, index)
-    return {"job_id": job_id, **result.data}
+    return redact_sensitive_fields({"job_id": job_id, **result.data})
 
 
 @router.patch("/{job_id}/chapters/{index}")

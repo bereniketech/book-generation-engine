@@ -5,7 +5,13 @@ from pydantic import BaseModel
 from fastapi import APIRouter
 
 from app.core.logging import get_logger
-from app.infrastructure.http_exceptions import JobNotFoundError, NoCoverAwaitingApprovalError
+from app.domain.state_machine import InvalidStateTransitionError as DomainInvalidStateTransitionError
+from app.domain.state_machine import cover_state_machine
+from app.infrastructure.http_exceptions import (
+    InvalidStateTransitionError,
+    JobNotFoundError,
+)
+from app.infrastructure.security import redact_sensitive_fields
 from app.infrastructure.supabase_client import get_supabase_client
 
 log = get_logger(__name__)
@@ -20,6 +26,19 @@ def _get_job_or_404(job_id: str) -> dict:
     return result.data
 
 
+def _validate_cover_transition(job: dict, target: str) -> None:
+    """Validate cover status transition, mapping domain errors to HTTP exceptions."""
+    current = job.get("cover_status") or ""
+    try:
+        cover_state_machine.validate_transition(current, target)
+    except DomainInvalidStateTransitionError as exc:
+        raise InvalidStateTransitionError(
+            current=exc.current,
+            target=exc.target,
+            valid_transitions=exc.valid_transitions,
+        ) from exc
+
+
 class ReviseRequest(BaseModel):
     feedback: str
 
@@ -27,18 +46,17 @@ class ReviseRequest(BaseModel):
 @router.get("/{job_id}/cover")
 async def get_cover(job_id: str):
     job = _get_job_or_404(job_id)
-    return {
+    return redact_sensitive_fields({
         "job_id": job_id,
         "cover_url": job.get("cover_url"),
         "cover_status": job.get("cover_status"),
-    }
+    })
 
 
 @router.post("/{job_id}/cover/approve")
 async def approve_cover(job_id: str):
     job = _get_job_or_404(job_id)
-    if job.get("cover_status") != "awaiting_approval":
-        raise NoCoverAwaitingApprovalError()
+    _validate_cover_transition(job, "approved")
     get_supabase_client().table("jobs").update({
         "cover_status": "approved",
         "status": "assembling",
@@ -50,9 +68,8 @@ async def approve_cover(job_id: str):
 @router.post("/{job_id}/cover/revise")
 async def revise_cover(job_id: str, body: ReviseRequest):
     job = _get_job_or_404(job_id)
-    if job.get("cover_status") != "awaiting_approval":
-        raise NoCoverAwaitingApprovalError()
-    config = job.get("config", {})
+    _validate_cover_transition(job, "revising")
+    config = dict(job.get("config") or {})
     config["cover_revision_feedback"] = body.feedback
     get_supabase_client().table("jobs").update({
         "cover_status": "revising",

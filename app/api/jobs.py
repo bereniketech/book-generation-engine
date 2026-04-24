@@ -8,12 +8,16 @@ from fastapi import APIRouter, Query, Request, Response, WebSocket, WebSocketDis
 from pydantic import BaseModel
 
 from app.core.logging import get_logger
+from app.domain.state_machine import InvalidStateTransitionError as DomainInvalidStateTransitionError
+from app.domain.state_machine import job_state_machine
 from app.infrastructure.http_exceptions import (
     InvalidStateTransitionError,
     JobNotFoundError,
     TemplateNotFoundError,
 )
+from app.infrastructure.security import redact_sensitive_fields
 from app.infrastructure.supabase_client import get_supabase_client
+from app.domain.validation_schemas import JobCreateRequest
 from app.models.job import JobCreate, JobResponse
 from app.queue.publisher import publish_job
 from app.services import job_service
@@ -24,8 +28,6 @@ log = get_logger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["jobs"])
 jobs_router = APIRouter(prefix="/jobs", tags=["jobs"])
-
-TERMINAL_STATES = {"complete", "cancelled"}
 
 
 class CreateJobRequest(BaseModel):
@@ -43,7 +45,7 @@ def _get_job_or_404(supabase, job_id: str) -> dict:
 
 
 @router.post("/jobs", status_code=status.HTTP_201_CREATED, response_model=JobResponse)
-async def create_job(body: JobCreate, request: Request) -> JobResponse:
+async def create_job(body: JobCreateRequest, request: Request) -> JobResponse:
     supabase = request.app.state.supabase
     channel = request.app.state.amqp_channel
 
@@ -128,7 +130,7 @@ async def list_jobs(
         query = query.eq("status", status)
     result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
     return {
-        "jobs": result.data,
+        "jobs": [redact_sensitive_fields(job) for job in result.data],
         "total": result.count or 0,
         "page": page,
         "limit": limit,
@@ -137,15 +139,17 @@ async def list_jobs(
 
 @router.patch("/jobs/{job_id}/pause")
 async def pause_job(job_id: str, request: Request) -> dict:
-    """Pause a running job. Returns 409 if job is in a terminal state."""
+    """Pause a running job. Returns 409 if the transition is not allowed."""
     supabase = request.app.state.supabase
     job = _get_job_or_404(supabase, job_id)
-    if job["status"] in TERMINAL_STATES:
+    try:
+        job_state_machine.validate_transition(job["status"], "paused")
+    except DomainInvalidStateTransitionError as exc:
         raise InvalidStateTransitionError(
-            current=job["status"],
-            target="paused",
-            valid_transitions=["generating", "queued"],
-        )
+            current=exc.current,
+            target=exc.target,
+            valid_transitions=exc.valid_transitions,
+        ) from exc
     supabase.table("jobs").update({"status": "paused"}).eq("id", job_id).execute()
     log.info("api.job.paused", job_id=job_id)
     return {"id": job_id, "status": "paused"}
@@ -153,9 +157,17 @@ async def pause_job(job_id: str, request: Request) -> dict:
 
 @router.patch("/jobs/{job_id}/resume")
 async def resume_job(job_id: str, request: Request) -> dict:
-    """Resume a paused job by setting status back to queued."""
+    """Resume a paused job by setting status back to queued. Returns 409 if not allowed."""
     supabase = request.app.state.supabase
-    _get_job_or_404(supabase, job_id)
+    job = _get_job_or_404(supabase, job_id)
+    try:
+        job_state_machine.validate_transition(job["status"], "queued")
+    except DomainInvalidStateTransitionError as exc:
+        raise InvalidStateTransitionError(
+            current=exc.current,
+            target=exc.target,
+            valid_transitions=exc.valid_transitions,
+        ) from exc
     supabase.table("jobs").update({"status": "queued"}).eq("id", job_id).execute()
     log.info("api.job.resumed", job_id=job_id)
     return {"id": job_id, "status": "queued"}

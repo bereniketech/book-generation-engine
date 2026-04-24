@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import type { JobCreateRequest } from "@/types/job";
+import { JobCreateSchema, type JobCreateInput } from "@/lib/validation";
 import { createJob } from "@/lib/api";
 import { ProviderConfigPanel } from "./ProviderConfigPanel";
 
@@ -16,7 +17,8 @@ export function JobCreatorForm() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<JobCreateRequest>({
+  } = useForm<JobCreateInput>({
+    resolver: zodResolver(JobCreateSchema),
     defaultValues: {
       mode: "fiction",
       target_chapters: 12,
@@ -25,11 +27,16 @@ export function JobCreatorForm() {
     },
   });
 
-  const onSubmit = async (data: JobCreateRequest) => {
+  const onSubmit = async (data: JobCreateInput) => {
     setSubmitting(true);
     setApiError(null);
+    // Normalise empty notification_email string to undefined before sending.
+    const payload = {
+      ...data,
+      notification_email: data.notification_email || undefined,
+    };
     try {
-      const response = await createJob(data);
+      const response = await createJob(payload);
       router.push(`/jobs/${response.job_id}`);
     } catch (err: unknown) {
       const e = err as { detail?: { detail?: string } };
@@ -51,27 +58,34 @@ export function JobCreatorForm() {
       <div>
         <label className="block text-sm text-gray-300 mb-1">Book Title</label>
         <input
-          {...register("title", { required: "Title is required", maxLength: { value: 500, message: "Max 500 characters" } })}
+          {...register("title")}
           className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-600"
           placeholder="The Iron Path"
         />
-        {errors.title && <p className="text-red-400 text-xs mt-1">{errors.title.message}</p>}
+        {errors.title && (
+          <p className="text-red-400 text-xs mt-1">{errors.title.message}</p>
+        )}
       </div>
 
       <div>
         <label className="block text-sm text-gray-300 mb-1">Topic / Idea</label>
         <textarea
-          {...register("topic", { required: "Topic is required", maxLength: { value: 2000, message: "Max 2000 characters" } })}
+          {...register("topic")}
           className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-600 h-24"
           placeholder="A warrior's journey toward redemption through stoic philosophy..."
         />
-        {errors.topic && <p className="text-red-400 text-xs mt-1">{errors.topic.message}</p>}
+        {errors.topic && (
+          <p className="text-red-400 text-xs mt-1">{errors.topic.message}</p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm text-gray-300 mb-1">Mode</label>
-          <select {...register("mode")} className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-600">
+          <select
+            {...register("mode")}
+            className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-600"
+          >
             <option value="fiction">Fiction</option>
             <option value="non_fiction">Non-Fiction</option>
           </select>
@@ -80,9 +94,12 @@ export function JobCreatorForm() {
           <label className="block text-sm text-gray-300 mb-1">Target Chapters</label>
           <input
             type="number"
-            {...register("target_chapters", { min: 3, max: 50, valueAsNumber: true })}
+            {...register("target_chapters", { valueAsNumber: true })}
             className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-600"
           />
+          {errors.target_chapters && (
+            <p className="text-red-400 text-xs mt-1">{errors.target_chapters.message}</p>
+          )}
         </div>
       </div>
 
@@ -90,20 +107,24 @@ export function JobCreatorForm() {
         <div>
           <label className="block text-sm text-gray-300 mb-1">Target Audience</label>
           <input
-            {...register("audience", { required: "Audience is required" })}
+            {...register("audience")}
             className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-600"
             placeholder="Adults aged 30-50"
           />
-          {errors.audience && <p className="text-red-400 text-xs mt-1">{errors.audience.message}</p>}
+          {errors.audience && (
+            <p className="text-red-400 text-xs mt-1">{errors.audience.message}</p>
+          )}
         </div>
         <div>
           <label className="block text-sm text-gray-300 mb-1">Tone</label>
           <input
-            {...register("tone", { required: "Tone is required" })}
+            {...register("tone")}
             className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-600"
             placeholder="Authoritative yet accessible"
           />
-          {errors.tone && <p className="text-red-400 text-xs mt-1">{errors.tone.message}</p>}
+          {errors.tone && (
+            <p className="text-red-400 text-xs mt-1">{errors.tone.message}</p>
+          )}
         </div>
       </div>
 
@@ -117,6 +138,9 @@ export function JobCreatorForm() {
           className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-600"
           placeholder="you@example.com"
         />
+        {errors.notification_email && (
+          <p className="text-red-400 text-xs mt-1">{errors.notification_email.message}</p>
+        )}
       </div>
 
       <button

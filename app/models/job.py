@@ -1,33 +1,22 @@
-"""Pydantic models for job API."""
+"""Pydantic models for job API.
+
+LLMProviderConfig, ImageProviderConfig, and JobCreate (aka JobCreateRequest)
+are the single-source-of-truth models defined in app.domain.validation_schemas.
+This module re-exports them for backwards-compatibility with existing imports.
+"""
 from __future__ import annotations
 
-from typing import Literal
+from pydantic import BaseModel
 
-from pydantic import BaseModel, Field
+# Re-export canonical validation models so all importers use one definition.
+from app.domain.validation_schemas import (  # noqa: F401
+    ImageProviderConfig,
+    JobCreateRequest,
+    LLMProviderConfig,
+)
 
-
-class LLMProviderConfig(BaseModel):
-    provider: Literal["anthropic", "openai", "google", "ollama", "openai-compatible"]
-    model: str = Field(min_length=1, max_length=200)
-    api_key: str = Field(min_length=1, max_length=500)
-    base_url: str | None = None
-
-
-class ImageProviderConfig(BaseModel):
-    provider: Literal["dall-e-3", "replicate-flux"]
-    api_key: str = Field(min_length=1, max_length=500)
-
-
-class JobCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
-    topic: str = Field(min_length=1, max_length=2000)
-    mode: Literal["fiction", "non_fiction"]
-    audience: str = Field(min_length=1, max_length=500)
-    tone: str = Field(min_length=1, max_length=200)
-    target_chapters: int = Field(ge=3, le=50, default=12)
-    llm: LLMProviderConfig
-    image: ImageProviderConfig
-    notification_email: str | None = None
+# Alias: existing code imports JobCreate; map it to the canonical name.
+JobCreate = JobCreateRequest
 
 
 class JobResponse(BaseModel):
@@ -36,7 +25,7 @@ class JobResponse(BaseModel):
     ws_url: str
 
     @classmethod
-    def from_job_id(cls, job_id: str, base_url: str) -> JobResponse:
+    def from_job_id(cls, job_id: str, base_url: str) -> "JobResponse":
         return cls(
             job_id=job_id,
             status="queued",

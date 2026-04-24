@@ -44,7 +44,7 @@ def test_approve_cover_no_pending_returns_409():
     with patch("app.api.cover.get_supabase_client", return_value=mock_client):
         resp = client.post("/jobs/job-1/cover/approve")
     assert resp.status_code == 409
-    assert resp.json()["detail"]["code"] == "NO_PENDING_COVER"
+    assert resp.json()["detail"]["code"] == "INVALID_STATE_TRANSITION"
 
 
 def test_revise_cover_sets_revising():
@@ -75,5 +75,5 @@ def test_revise_cover_no_pending_returns_structured_error():
         resp = client.post("/jobs/job-1/cover/revise", json={"feedback": "Redo it"})
     assert resp.status_code == 409
     body = resp.json()
-    assert body["detail"]["code"] == "NO_PENDING_COVER"
+    assert body["detail"]["code"] == "INVALID_STATE_TRANSITION"
     assert isinstance(body["detail"]["error"], str)
