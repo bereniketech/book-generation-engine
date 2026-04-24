@@ -33,3 +33,6 @@ node_modules/
 # Kit & spec
 .kit/
 .spec/
+
+# Generated files (from scripts/generate_schema.py)
+frontend/lib/generated/

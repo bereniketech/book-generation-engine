@@ -1,7 +1,7 @@
 /**
- * Unit tests for frontend/lib/validation.ts (JobCreateSchema and sub-schemas).
+ * Unit tests for frontend/lib/generated/job_schema.ts (JobCreateSchema and sub-schemas).
  *
- * Constraint reference (must match app/domain/validation_schemas.py):
+ * Constraint reference (auto-generated from app/domain/validation_schemas.py):
  *   title            : min 1, max 500
  *   topic            : min 1, max 2000
  *   mode             : fiction | non_fiction
@@ -17,7 +17,7 @@ import {
   JobCreateSchema,
   LLMProviderSchema,
   ImageProviderSchema,
-} from "./validation";
+} from "./generated/job_schema";
 
 // ---------------------------------------------------------------------------
 // Helpers
