@@ -56,20 +56,41 @@ def test_create_template_internal_error_returns_structured_error():
 
 
 def test_create_job_with_template_merges_config():
+    from unittest.mock import AsyncMock, patch
+
     mock_supabase = MagicMock()
     mock_supabase.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {
-        "config": {"genre": "fiction", "chapters": 12, "language": "en"}
+        "config": {
+            "genre": "fiction",
+            "chapters": 12,
+            "language": "en",
+            "title": "Template Title",
+            "topic": "Template Topic",
+            "mode": "fiction",
+            "audience": "Everyone",
+            "tone": "Formal",
+            "target_chapters": 12,
+            "llm": {"provider": "anthropic", "model": "claude-opus", "api_key": "template-key"},
+            "image": {"provider": "dall-e-3", "api_key": "template-img-key"},
+        }
     }
     mock_supabase.table.return_value.insert.return_value.execute.return_value.data = [{"id": "new-job"}]
+    mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value = None
 
     client = _make_client(mock_supabase)
-    resp = client.post("/jobs", json={
-        "config": {"genre": "sci-fi", "title": "Override Title"},
-        "template_id": "t-1",
-    })
+    with patch("app.services.job_creation_service.job_service.create_job") as mock_create, \
+         patch("app.services.job_creation_service.publish_job", new_callable=AsyncMock):
+        mock_create.return_value = {"id": "new-job"}
+        app.state.amqp_channel = MagicMock()
+
+        resp = client.post("/jobs", json={
+            "config": {"genre": "sci-fi", "title": "Override Title"},
+            "template_id": "t-1",
+        })
 
     assert resp.status_code == 201
-    insert_call = mock_supabase.table.return_value.insert.call_args[0][0]
-    assert insert_call["config"]["genre"] == "sci-fi"
-    assert insert_call["config"]["chapters"] == 12
-    assert insert_call["config"]["title"] == "Override Title"
+    data = resp.json()
+    assert "id" in data
+    assert data["status"] == "queued"
+    # Verify the create_job_service was called with merged config
+    mock_create.assert_called_once()

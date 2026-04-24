@@ -34,10 +34,17 @@ class BaseEngine(ABC):
     """All pipeline engines extend this class."""
     name: str = "base"
 
-    def __init__(self, llm: LLMClient, memory: MemoryStore, config: JobConfig) -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        memory: MemoryStore,
+        config: JobConfig,
+        supabase: Any | None = None,
+    ) -> None:
         self.llm = llm
         self.memory = memory
         self.config = config
+        self.supabase = supabase
 
     @abstractmethod
     def run(self, context: dict[str, Any]) -> dict[str, Any]:

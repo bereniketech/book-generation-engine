@@ -207,6 +207,7 @@ class PipelineRunner:
             memory=self.memory,
             config=self.config,
             image_client=self.image_client,
+            supabase=self.supabase,
         )
         ctx = cover_engine.run(ctx)
 

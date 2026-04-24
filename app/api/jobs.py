@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Request, Response, WebSocket, WebSocketDisconnect, status
@@ -21,8 +20,9 @@ from app.infrastructure.http_exceptions import (
 from app.infrastructure.security import redact_sensitive_fields
 from app.domain.validation_schemas import JobCreateRequest
 from app.models.job import JobCreate, JobResponse
-from app.queue.publisher import publish_job
 from app.services import job_service
+from app.services.job_creation_service import create_job as create_job_service
+from app.services.job_creation_service import merge_template
 from app.services.progress import get_snapshot, subscribe_progress
 from app.services.token_tracker import get_job_usage
 
@@ -53,28 +53,25 @@ async def create_job(
 ) -> JobResponse:
     channel = request.app.state.amqp_channel
 
-    job_id = str(uuid.uuid4())
-    config = body.model_dump()
-
-    job_service.create_job(
+    result = await create_job_service(
+        request=body,
         supabase=supabase,
-        job_id=job_id,
-        config=config,
-        notification_email=body.notification_email,
+        channel=channel,
+        email=body.notification_email,
     )
-    await publish_job(channel=channel, job_id=job_id, config=config)
 
     base_url = str(request.base_url).rstrip("/")
-    return JobResponse.from_job_id(job_id, base_url)
+    return JobResponse.from_job_id(result.job_id, base_url)
 
 
 @jobs_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_job_with_template(
     body: CreateJobRequest,
+    request: Request,
     supabase: Client = Depends(get_supabase),
 ) -> dict:
     """Submit a new job, optionally merging a template config."""
-    config = dict(body.config)
+    channel = request.app.state.amqp_channel
 
     if body.template_id:
         template_result = (
@@ -87,18 +84,24 @@ async def create_job_with_template(
         )
         if not template_result.data:
             raise TemplateNotFoundError(body.template_id)
-        merged = {**template_result.data["config"], **config}
-        config = merged
 
-    result = supabase.table("jobs").insert({
-        "config": config,
-        "status": "queued",
-        "notification_email": body.notification_email,
-    }).execute()
+        # Merge template config with overrides
+        # Start with template config, apply overrides from body.config
+        merged_config = {**template_result.data["config"], **body.config}
+        merged_request = JobCreateRequest(**merged_config)
+    else:
+        # No template, validate body.config directly as JobCreateRequest
+        merged_request = JobCreateRequest(**body.config)
 
-    job_id = result.data[0]["id"]
-    safe_log(logging.INFO, "api.job.created", job_id=job_id, has_template=body.template_id is not None)
-    return {"id": job_id, "status": "queued"}
+    result = await create_job_service(
+        request=merged_request,
+        supabase=supabase,
+        channel=channel,
+        email=body.notification_email or merged_request.notification_email,
+    )
+
+    safe_log(logging.INFO, "api.job.created", job_id=result.job_id, has_template=body.template_id is not None)
+    return {"id": result.job_id, "status": "queued"}
 
 
 @router.get("/jobs/{job_id}")

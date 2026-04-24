@@ -47,8 +47,8 @@ def make_job_body() -> dict:
 
 
 def test_create_job_returns_201_with_job_id(client):
-    with patch("app.api.jobs.job_service.create_job") as mock_create, \
-         patch("app.api.jobs.publish_job", new_callable=AsyncMock):
+    with patch("app.services.job_creation_service.job_service.create_job") as mock_create, \
+         patch("app.services.job_creation_service.publish_job", new_callable=AsyncMock):
         mock_create.return_value = {"id": "job-uuid-1"}
         client.app.state.amqp_channel = MagicMock()
 

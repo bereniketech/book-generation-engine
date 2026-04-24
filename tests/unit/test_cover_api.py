@@ -1,6 +1,6 @@
 """Unit tests for cover approval API."""
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -56,10 +56,22 @@ def test_revise_cover_sets_revising():
     mock_supabase = MagicMock()
     mock_supabase.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data = _mock_job("awaiting_approval")
     mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
-    client = _make_client(mock_supabase)
-    resp = client.post("/jobs/job-1/cover/revise", json={"feedback": "Make it darker"})
-    assert resp.status_code == 200
-    assert resp.json()["cover_status"] == "revising"
+
+    # Mock the cover_revision_service.add_revision call
+    with patch("app.api.cover.cover_revision_service.add_revision", new_callable=AsyncMock) as mock_add_revision:
+        mock_add_revision.return_value = {
+            "id": "rev-1",
+            "job_id": "job-1",
+            "feedback": "Make it darker",
+            "revision_number": 1,
+            "requested_at": "2026-04-24T12:00:00Z",
+        }
+        client = _make_client(mock_supabase)
+        resp = client.post("/jobs/job-1/cover/revise", json={"feedback": "Make it darker"})
+        assert resp.status_code == 200
+        assert resp.json()["cover_status"] == "revising"
+        # Verify the service was called
+        mock_add_revision.assert_called_once_with(mock_supabase, "job-1", "Make it darker")
 
 
 def test_get_cover_job_not_found_returns_structured_error():
@@ -76,9 +88,14 @@ def test_get_cover_job_not_found_returns_structured_error():
 def test_revise_cover_no_pending_returns_structured_error():
     mock_supabase = MagicMock()
     mock_supabase.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data = _mock_job("approved")
-    client = _make_client(mock_supabase)
-    resp = client.post("/jobs/job-1/cover/revise", json={"feedback": "Redo it"})
-    assert resp.status_code == 409
-    body = resp.json()
-    assert body["detail"]["code"] == "INVALID_STATE_TRANSITION"
-    assert isinstance(body["detail"]["error"], str)
+
+    # Mock the cover_revision_service.add_revision call (should not be called due to validation failure)
+    with patch("app.api.cover.cover_revision_service.add_revision", new_callable=AsyncMock) as mock_add_revision:
+        client = _make_client(mock_supabase)
+        resp = client.post("/jobs/job-1/cover/revise", json={"feedback": "Redo it"})
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["detail"]["code"] == "INVALID_STATE_TRANSITION"
+        assert isinstance(body["detail"]["error"], str)
+        # Service should not have been called because validation failed
+        mock_add_revision.assert_not_called()

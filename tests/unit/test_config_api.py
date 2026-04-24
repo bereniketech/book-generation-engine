@@ -82,6 +82,34 @@ def test_get_providers_response_shape():
     assert set(body.keys()) == {"llm_providers", "image_providers"}
 
 
+def test_get_providers_llm_includes_default_model():
+    """WHEN GET /v1/config/providers is called THEN each LLM provider SHALL have a default_model."""
+    client = _make_client()
+    response = client.get("/v1/config/providers")
+    body = response.json()
+    for provider, config in body["llm_providers"].items():
+        assert "default_model" in config
+        assert isinstance(config["default_model"], str)
+
+
+def test_get_providers_anthropic_default_model():
+    """WHEN GET /v1/config/providers is called THEN anthropic SHALL have claude-sonnet-4-6 as default."""
+    client = _make_client()
+    response = client.get("/v1/config/providers")
+    body = response.json()
+    assert body["llm_providers"]["anthropic"]["default_model"] == "claude-sonnet-4-6"
+
+
+def test_get_providers_image_includes_default_model():
+    """WHEN GET /v1/config/providers is called THEN each image provider SHALL have a default_model."""
+    client = _make_client()
+    response = client.get("/v1/config/providers")
+    body = response.json()
+    for provider, config in body["image_providers"].items():
+        assert "default_model" in config
+        assert isinstance(config["default_model"], str)
+
+
 def test_get_providers_expected_llm_list():
     """WHEN GET /v1/config/providers is called THEN llm_providers SHALL match the canonical list."""
     client = _make_client()

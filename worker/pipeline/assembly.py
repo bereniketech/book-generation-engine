@@ -9,6 +9,7 @@ from typing import Any
 
 from worker.clients.image_client import ImageClient
 from worker.pipeline.base import BaseEngine
+from app.services import cover_revision_service
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,25 @@ class CoverEngine(BaseEngine):
         # Use revised brief if the user edited it during review
         approved_brief = context.get("cover_brief_revised", cover_brief)
         context["cover_brief"] = approved_brief
+
+        # Step 2.5: Check for cover revision feedback from the cover_revisions audit trail
+        if self.supabase:
+            import asyncio
+            latest_revision = asyncio.run(
+                cover_revision_service.get_latest_revision(self.supabase, self.config.job_id)
+            )
+            if latest_revision:
+                feedback = latest_revision.get("feedback", "")
+                logger.info(
+                    "[CoverEngine] Incorporating cover revision feedback from revision #%d: %s...",
+                    latest_revision.get("revision_number"),
+                    feedback[:100],
+                )
+                # Incorporate feedback into the cover brief for regeneration
+                approved_brief = (
+                    f"{approved_brief}\n\nUser feedback from revision #{latest_revision.get('revision_number')}: {feedback}"
+                )
+                context["cover_brief"] = approved_brief
 
         # Step 3: Generate cover image from approved brief
         image_prompt = (

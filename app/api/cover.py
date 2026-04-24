@@ -14,6 +14,7 @@ from app.infrastructure.http_exceptions import (
     JobNotFoundError,
 )
 from app.infrastructure.security import redact_sensitive_fields
+from app.services import cover_revision_service
 
 log = get_logger(__name__)
 
@@ -87,12 +88,14 @@ async def revise_cover(
 ):
     job = _get_job_or_404(supabase, job_id)
     _validate_cover_transition(job, "revising")
-    config = dict(job.get("config") or {})
-    config["cover_revision_feedback"] = body.feedback
+
+    # Record the revision in the audit trail
+    await cover_revision_service.add_revision(supabase, job_id, body.feedback)
+
+    # Update job status and transition cover_status (but NOT config)
     supabase.table("jobs").update({
         "cover_status": "revising",
         "status": "generating",
-        "config": config,
     }).eq("id", job_id).execute()
     log.info("cover.revision_requested", job_id=job_id, feedback_length=len(body.feedback))
     return {"job_id": job_id, "cover_status": "revising"}

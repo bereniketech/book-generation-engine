@@ -4,19 +4,20 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
-import json
 import os
 import uuid
 from typing import Any
 
 import aio_pika
 from fastapi import APIRouter, Body, Depends, UploadFile, File
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from supabase import Client
 
 from app.api.deps import get_supabase
 from app.core.logging import get_logger
 from app.infrastructure.http_exceptions import EmptyBatchError
+from app.services.job_creation_service import create_job as create_job_service
+from app.services.job_creation_service import validate_job_request
 
 log = get_logger(__name__)
 
@@ -25,12 +26,6 @@ MAX_PARALLEL_JOBS = int(os.getenv("MAX_PARALLEL_JOBS", "10"))
 BATCH_THROTTLE_DELAY = float(os.getenv("BATCH_THROTTLE_DELAY", "0.5"))
 
 router = APIRouter(prefix="/batch", tags=["batch"])
-
-
-class JobConfigSchema(BaseModel):
-    """Minimal job config validation."""
-    title: str
-    genre: str
 
 
 class BatchJsonRequest(BaseModel):
@@ -50,24 +45,16 @@ async def _active_job_count(supabase: Client) -> int:
     return result.count or 0
 
 
-async def _enqueue_job(channel: aio_pika.abc.AbstractChannel, job_id: str, config: dict) -> None:
-    exchange = await channel.get_exchange("", ensure=False)
-    payload = {**config, "job_id": job_id}
-    await exchange.publish(
-        aio_pika.Message(
-            body=json.dumps(payload).encode(),
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-        ),
-        routing_key="bookgen.jobs",
-    )
-
-
 @router.post("")
 async def submit_batch(
     request: BatchJsonRequest = Body(...),
     supabase: Client = Depends(get_supabase),
 ):
-    """Submit a batch of jobs from a JSON payload."""
+    """Submit a batch of jobs from a JSON payload.
+
+    Each row is validated against JobCreateRequest. Invalid rows are rejected with
+    per-row error details; only valid rows are enqueued.
+    """
     batch_id = str(uuid.uuid4())
     job_ids: list[str] = []
     errors: list[dict] = []
@@ -77,12 +64,12 @@ async def submit_batch(
 
     try:
         for row_idx, raw_config in enumerate(request.jobs):
-            try:
-                validated = JobConfigSchema(**raw_config)
-                config = validated.model_dump()
-            except (ValidationError, Exception) as exc:
-                errors.append({"row": row_idx, "reason": str(exc)})
-                log.warning("batch.row.skipped", batch_id=batch_id, row=row_idx, reason=str(exc))
+            # Validate each row against full JobCreateRequest schema
+            validated_request, validation_errors = validate_job_request(raw_config)
+
+            if validation_errors:
+                errors.append({"row": row_idx, "errors": validation_errors})
+                log.warning("batch.row.validation.failed", batch_id=batch_id, row=row_idx, errors=validation_errors)
                 continue
 
             # Throttle: wait if too many active jobs
@@ -90,17 +77,19 @@ async def submit_batch(
                 log.info("batch.throttle.waiting", batch_id=batch_id, active=await _active_job_count(supabase))
                 await asyncio.sleep(BATCH_THROTTLE_DELAY)
 
-            # Insert job record
-            job_result = supabase.table("jobs").insert({
-                "config": config,
-                "status": "queued",
-                "batch_id": batch_id,
-            }).execute()
-            job_id = job_result.data[0]["id"]
+            # Create job using the centralized service
+            result = await create_job_service(
+                request=validated_request,
+                supabase=supabase,
+                channel=channel,
+                email=validated_request.notification_email,
+            )
 
-            await _enqueue_job(channel, job_id, config)
-            job_ids.append(job_id)
-            log.info("batch.job.enqueued", batch_id=batch_id, job_id=job_id, row=row_idx)
+            # Update job record with batch_id (already created in create_job_service)
+            supabase.table("jobs").update({"batch_id": batch_id}).eq("id", result.job_id).execute()
+
+            job_ids.append(result.job_id)
+            log.info("batch.job.enqueued", batch_id=batch_id, job_id=result.job_id, row=row_idx)
 
     finally:
         await connection.close()
