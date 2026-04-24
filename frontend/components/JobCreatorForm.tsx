@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { JobCreateSchema, type JobCreateInput } from "@/lib/validation";
 import { createJob } from "@/lib/api";
+import { getProviders } from "@/lib/config";
 import { ProviderConfigPanel } from "./ProviderConfigPanel";
 
 export function JobCreatorForm() {
@@ -17,15 +18,38 @@ export function JobCreatorForm() {
     register,
     handleSubmit,
     formState: { errors },
+    reset,
   } = useForm<JobCreateInput>({
     resolver: zodResolver(JobCreateSchema),
     defaultValues: {
       mode: "fiction",
       target_chapters: 12,
-      llm: { provider: "anthropic", model: "claude-sonnet-4-6" },
+      llm: { provider: "anthropic", model: "" },
       image: { provider: "dall-e-3" },
     },
   });
+
+  // Initialize model defaults from config endpoint
+  useEffect(() => {
+    getProviders()
+      .then((providers) => {
+        reset({
+          mode: "fiction",
+          target_chapters: 12,
+          llm: {
+            provider: "anthropic",
+            model: providers.llm_providers.anthropic?.default_model || "claude-sonnet-4-6",
+          },
+          image: {
+            provider: "dall-e-3",
+          },
+        });
+      })
+      .catch(() => {
+        // If config fails, form stays with empty model field
+        // User will see placeholder and can enter manually
+      });
+  }, [reset]);
 
   const onSubmit = async (data: JobCreateInput) => {
     setSubmitting(true);

@@ -23,22 +23,22 @@ def test_get_providers_returns_200():
 
 
 def test_get_providers_returns_llm_providers():
-    """WHEN GET /v1/config/providers is called THEN response SHALL contain llm_providers list."""
+    """WHEN GET /v1/config/providers is called THEN response SHALL contain llm_providers dict."""
     client = _make_client()
     response = client.get("/v1/config/providers")
     body = response.json()
     assert "llm_providers" in body
-    assert isinstance(body["llm_providers"], list)
+    assert isinstance(body["llm_providers"], dict)
     assert len(body["llm_providers"]) > 0
 
 
 def test_get_providers_returns_image_providers():
-    """WHEN GET /v1/config/providers is called THEN response SHALL contain image_providers list."""
+    """WHEN GET /v1/config/providers is called THEN response SHALL contain image_providers dict."""
     client = _make_client()
     response = client.get("/v1/config/providers")
     body = response.json()
     assert "image_providers" in body
-    assert isinstance(body["image_providers"], list)
+    assert isinstance(body["image_providers"], dict)
     assert len(body["image_providers"]) > 0
 
 
@@ -111,18 +111,18 @@ def test_get_providers_image_includes_default_model():
 
 
 def test_get_providers_expected_llm_list():
-    """WHEN GET /v1/config/providers is called THEN llm_providers SHALL match the canonical list."""
+    """WHEN GET /v1/config/providers is called THEN llm_providers keys SHALL match the canonical list."""
     client = _make_client()
     response = client.get("/v1/config/providers")
     body = response.json()
     expected = {"anthropic", "openai", "google", "ollama", "openai-compatible"}
-    assert set(body["llm_providers"]) == expected
+    assert set(body["llm_providers"].keys()) == expected
 
 
 def test_get_providers_expected_image_list():
-    """WHEN GET /v1/config/providers is called THEN image_providers SHALL match the canonical list."""
+    """WHEN GET /v1/config/providers is called THEN image_providers keys SHALL match the canonical list."""
     client = _make_client()
     response = client.get("/v1/config/providers")
     body = response.json()
     expected = {"dall-e-3", "replicate-flux"}
-    assert set(body["image_providers"]) == expected
+    assert set(body["image_providers"].keys()) == expected

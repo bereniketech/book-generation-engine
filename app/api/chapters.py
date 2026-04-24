@@ -7,6 +7,7 @@ from supabase import Client
 
 from app.api.deps import get_supabase
 from app.core.logging import get_logger
+from app.domain.constants import CHAPTER_PREVIEW_CHARS
 from app.infrastructure.http_exceptions import ChapterNotFoundError
 from app.infrastructure.security import redact_sensitive_fields
 
@@ -17,6 +18,28 @@ router = APIRouter(prefix="/jobs", tags=["chapters"])
 
 class ChapterEditRequest(BaseModel):
     content: str
+
+
+def _truncate_at_word_boundary(text: str, max_chars: int) -> str:
+    """Truncate text at character limit with word-boundary awareness.
+
+    If the text exceeds max_chars, finds the last space within the limit
+    and truncates there. Appends … to indicate truncation.
+    If there's no space within the limit, truncates at the limit anyway.
+    """
+    if len(text) <= max_chars:
+        return text
+
+    # Truncate to max_chars and look backwards for the last space
+    truncated = text[:max_chars]
+    last_space = truncated.rfind(" ")
+
+    if last_space > 0:
+        # Found a space; truncate there
+        return truncated[:last_space] + "…"
+    else:
+        # No space found; truncate at limit
+        return truncated + "…"
 
 
 @router.get("/{job_id}/chapters")
@@ -38,7 +61,7 @@ async def list_chapters(
             "index": ch["index"],
             "status": ch["status"],
             "qa_score": ch.get("qa_score"),
-            "content_preview": (ch.get("content") or "")[:200],
+            "content_preview": _truncate_at_word_boundary(ch.get("content") or "", CHAPTER_PREVIEW_CHARS),
         })
         for ch in result.data
     ]

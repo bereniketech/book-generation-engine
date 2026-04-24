@@ -6,9 +6,14 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export interface ProviderConfig {
+  default_model: string;
+  models?: string[];
+}
+
 export interface ProvidersResponse {
-  llm_providers: string[];
-  image_providers: string[];
+  llm_providers: Record<string, ProviderConfig>;
+  image_providers: Record<string, ProviderConfig>;
 }
 
 let cachedProviders: ProvidersResponse | null = null;
@@ -30,7 +35,8 @@ export async function getProviders(): Promise<ProvidersResponse> {
 
   const data = (await response.json()) as ProvidersResponse;
 
-  if (!Array.isArray(data.llm_providers) || !Array.isArray(data.image_providers)) {
+  if (!data.llm_providers || typeof data.llm_providers !== "object" ||
+      !data.image_providers || typeof data.image_providers !== "object") {
     throw new Error("Invalid providers response shape from server");
   }
 

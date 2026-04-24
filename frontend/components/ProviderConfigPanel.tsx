@@ -34,8 +34,8 @@ export function ProviderConfigPanel({ register, errors }: Props) {
       .then((providers) => {
         if (!cancelled) {
           setState({
-            llmProviders: providers.llm_providers,
-            imageProviders: providers.image_providers,
+            llmProviders: Object.keys(providers.llm_providers),
+            imageProviders: Object.keys(providers.image_providers),
             loading: false,
             error: null,
           });
