@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.admin import router as admin_router
 from app.api.batch import router as batch_router
 from app.api.chapters import router as chapters_router
+from app.api.config import router as config_router
 from app.api.cover import router as cover_router
 from app.api.jobs import router as jobs_router, jobs_router as jobs_base_router
 from app.api.templates import router as templates_router
@@ -39,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(config_router)
 app.include_router(jobs_router)
 app.include_router(jobs_base_router)
 app.include_router(chapters_router)

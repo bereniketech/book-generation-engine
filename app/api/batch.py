@@ -10,16 +10,15 @@ import uuid
 from typing import Any
 
 import aio_pika
-from fastapi import APIRouter, Body, HTTPException, UploadFile, File
+from fastapi import APIRouter, Body, UploadFile, File
 from pydantic import BaseModel, ValidationError
-from supabase import create_client
 
 from app.core.logging import get_logger
+from app.infrastructure.http_exceptions import EmptyBatchError
+from app.infrastructure.supabase_client import get_supabase_client
 
 log = get_logger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
 MAX_PARALLEL_JOBS = int(os.getenv("MAX_PARALLEL_JOBS", "10"))
 BATCH_THROTTLE_DELAY = float(os.getenv("BATCH_THROTTLE_DELAY", "0.5"))
@@ -38,14 +37,10 @@ class BatchJsonRequest(BaseModel):
     jobs: list[dict[str, Any]]
 
 
-def _supabase():
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-
-
 async def _active_job_count() -> int:
     """Count jobs currently queued or generating."""
     result = (
-        _supabase()
+        get_supabase_client()
         .table("jobs")
         .select("id", count="exact")
         .in_("status", ["queued", "generating"])
@@ -72,7 +67,7 @@ async def submit_batch(request: BatchJsonRequest = Body(...)):
     batch_id = str(uuid.uuid4())
     job_ids: list[str] = []
     errors: list[dict] = []
-    client = _supabase()
+    client = get_supabase_client()
 
     connection = await aio_pika.connect_robust(RABBITMQ_URL)
     channel = await connection.channel()
@@ -108,10 +103,7 @@ async def submit_batch(request: BatchJsonRequest = Body(...)):
         await connection.close()
 
     if not job_ids:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "No valid jobs in batch", "code": "EMPTY_BATCH"},
-        )
+        raise EmptyBatchError()
 
     log.info("batch.complete", batch_id=batch_id, enqueued=len(job_ids), skipped=len(errors))
     return {

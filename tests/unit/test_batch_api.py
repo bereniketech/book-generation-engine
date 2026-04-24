@@ -19,7 +19,7 @@ def test_batch_submit_json_valid_jobs():
     mock_exchange = AsyncMock()
     mock_channel.get_exchange.return_value = mock_exchange
 
-    with patch("app.api.batch._supabase", return_value=mock_supabase), \
+    with patch("app.api.batch.get_supabase_client", return_value=mock_supabase), \
          patch("aio_pika.connect_robust", return_value=mock_connection):
         resp = client.post("/batch", json={
             "format": "json",
@@ -44,7 +44,7 @@ def test_batch_submit_invalid_row_skipped():
     mock_exchange = AsyncMock()
     mock_channel.get_exchange.return_value = mock_exchange
 
-    with patch("app.api.batch._supabase", return_value=mock_supabase), \
+    with patch("app.api.batch.get_supabase_client", return_value=mock_supabase), \
          patch("aio_pika.connect_robust", return_value=mock_connection):
         resp = client.post("/batch", json={
             "format": "json",
@@ -70,7 +70,7 @@ def test_batch_all_invalid_returns_422():
     mock_channel = AsyncMock()
     mock_connection.channel.return_value = mock_channel
 
-    with patch("app.api.batch._supabase", return_value=mock_supabase), \
+    with patch("app.api.batch.get_supabase_client", return_value=mock_supabase), \
          patch("aio_pika.connect_robust", return_value=mock_connection):
         resp = client.post("/batch", json={
             "format": "json",

@@ -129,6 +129,39 @@ def test_restart_job_returns_201_with_new_job_id():
 
 
 # ---------------------------------------------------------------------------
+# get_job structured error
+# ---------------------------------------------------------------------------
+
+
+def test_get_job_not_found_returns_structured_error():
+    """get_job must return {error, code} not a plain string."""
+    client = _make_client()
+    mock_sb = MagicMock()
+    # job_service.get_job returns None when job is absent
+    with patch("app.api.jobs.job_service.get_job", return_value=None):
+        client.app.state.supabase = mock_sb
+        resp = client.get("/v1/jobs/missing-id")
+    assert resp.status_code == 404
+    body = resp.json()
+    assert body["detail"]["code"] == "JOB_NOT_FOUND"
+    assert isinstance(body["detail"]["error"], str)
+    assert "missing-id" in body["detail"]["error"]
+
+
+def test_pause_job_structured_error_has_valid_transitions():
+    """State transition 409 must include valid_transitions field."""
+    client = _make_client()
+    mock_sb = _mock_supabase(job_data=_mock_job("complete"))
+    client.app.state.supabase = mock_sb
+    resp = client.patch("/v1/jobs/job-1/pause")
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["detail"]["code"] == "INVALID_STATE_TRANSITION"
+    assert "valid_transitions" in body["detail"]
+    assert isinstance(body["detail"]["valid_transitions"], list)
+
+
+# ---------------------------------------------------------------------------
 # list jobs
 # ---------------------------------------------------------------------------
 

@@ -1,23 +1,16 @@
 """Chapter editing API endpoints."""
 from __future__ import annotations
 
-import os
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
-from supabase import create_client
+from fastapi import APIRouter
 
 from app.core.logging import get_logger
+from app.infrastructure.http_exceptions import ChapterNotFoundError
+from app.infrastructure.supabase_client import get_supabase_client
 
 log = get_logger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-
 router = APIRouter(prefix="/jobs", tags=["chapters"])
-
-
-def _client():
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
 class ChapterEditRequest(BaseModel):
@@ -28,7 +21,7 @@ class ChapterEditRequest(BaseModel):
 async def list_chapters(job_id: str):
     """List all chapters for a job with status and content preview."""
     result = (
-        _client()
+        get_supabase_client()
         .table("chapters")
         .select("index,status,qa_score,content")
         .eq("job_id", job_id)
@@ -51,7 +44,7 @@ async def list_chapters(job_id: str):
 async def get_chapter(job_id: str, index: int):
     """Get full chapter content with status and readability scores."""
     result = (
-        _client()
+        get_supabase_client()
         .table("chapters")
         .select("index,content,status,qa_score,flesch_kincaid_grade,flesch_reading_ease")
         .eq("job_id", job_id)
@@ -60,10 +53,7 @@ async def get_chapter(job_id: str, index: int):
         .execute()
     )
     if not result.data:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "Chapter not found", "code": "CHAPTER_NOT_FOUND"},
-        )
+        raise ChapterNotFoundError(job_id, index)
     return {"job_id": job_id, **result.data}
 
 
@@ -71,7 +61,7 @@ async def get_chapter(job_id: str, index: int):
 async def edit_chapter(job_id: str, index: int, body: ChapterEditRequest):
     """Update chapter content and set status to locked."""
     result = (
-        _client()
+        get_supabase_client()
         .table("chapters")
         .select("id")
         .eq("job_id", job_id)
@@ -80,11 +70,8 @@ async def edit_chapter(job_id: str, index: int, body: ChapterEditRequest):
         .execute()
     )
     if not result.data:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "Chapter not found", "code": "CHAPTER_NOT_FOUND"},
-        )
-    _client().table("chapters").update({
+        raise ChapterNotFoundError(job_id, index)
+    get_supabase_client().table("chapters").update({
         "content": body.content,
         "status": "locked",
     }).eq("job_id", job_id).eq("index", index).execute()

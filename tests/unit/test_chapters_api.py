@@ -22,7 +22,7 @@ def _mock_chapter(status: str = "generating") -> dict:
 def test_get_chapter_returns_content_and_scores():
     mock_client = MagicMock()
     mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = _mock_chapter()
-    with patch("app.api.chapters._client", return_value=mock_client):
+    with patch("app.api.chapters.get_supabase_client", return_value=mock_client):
         resp = client.get("/jobs/job-1/chapters/0")
     assert resp.status_code == 200
     data = resp.json()
@@ -34,7 +34,7 @@ def test_get_chapter_returns_content_and_scores():
 def test_get_chapter_not_found_returns_404():
     mock_client = MagicMock()
     mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = None
-    with patch("app.api.chapters._client", return_value=mock_client):
+    with patch("app.api.chapters.get_supabase_client", return_value=mock_client):
         resp = client.get("/jobs/job-1/chapters/99")
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "CHAPTER_NOT_FOUND"
@@ -44,7 +44,7 @@ def test_patch_chapter_sets_status_locked():
     mock_client = MagicMock()
     mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {"id": "ch-1"}
     mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock()
-    with patch("app.api.chapters._client", return_value=mock_client):
+    with patch("app.api.chapters.get_supabase_client", return_value=mock_client):
         resp = client.patch("/jobs/job-1/chapters/0", json={"content": "Edited content here."})
     assert resp.status_code == 200
     assert resp.json()["status"] == "locked"
@@ -53,6 +53,19 @@ def test_patch_chapter_sets_status_locked():
 def test_patch_chapter_not_found_returns_404():
     mock_client = MagicMock()
     mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = None
-    with patch("app.api.chapters._client", return_value=mock_client):
+    with patch("app.api.chapters.get_supabase_client", return_value=mock_client):
         resp = client.patch("/jobs/job-1/chapters/0", json={"content": "Some content."})
     assert resp.status_code == 404
+
+
+def test_get_chapter_not_found_error_contains_job_and_index():
+    """ChapterNotFoundError must embed job_id and index in message."""
+    mock_client = MagicMock()
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = None
+    with patch("app.api.chapters.get_supabase_client", return_value=mock_client):
+        resp = client.get("/jobs/job-xyz/chapters/7")
+    assert resp.status_code == 404
+    body = resp.json()
+    assert body["detail"]["code"] == "CHAPTER_NOT_FOUND"
+    assert "7" in body["detail"]["error"]
+    assert "job-xyz" in body["detail"]["error"]

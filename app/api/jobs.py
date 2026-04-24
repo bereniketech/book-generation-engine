@@ -4,10 +4,16 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Query, Request, Response, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
 
 from app.core.logging import get_logger
+from app.infrastructure.http_exceptions import (
+    InvalidStateTransitionError,
+    JobNotFoundError,
+    TemplateNotFoundError,
+)
+from app.infrastructure.supabase_client import get_supabase_client
 from app.models.job import JobCreate, JobResponse
 from app.queue.publisher import publish_job
 from app.services import job_service
@@ -31,19 +37,9 @@ class CreateJobRequest(BaseModel):
 def _get_job_or_404(supabase, job_id: str) -> dict:
     result = supabase.table("jobs").select("*").eq("id", job_id).single().execute()
     if not result.data:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "Job not found", "code": "JOB_NOT_FOUND"},
-        )
+        raise JobNotFoundError(job_id)
     return result.data
 
-
-def _client():
-    import os
-    from supabase import create_client
-    url = os.getenv("SUPABASE_URL", "")
-    key = os.getenv("SUPABASE_SERVICE_KEY", "")
-    return create_client(url, key)
 
 
 @router.post("/jobs", status_code=status.HTTP_201_CREATED, response_model=JobResponse)
@@ -73,7 +69,7 @@ async def create_job_with_template(body: CreateJobRequest, request: Request) -> 
 
     if body.template_id:
         template_result = (
-            _client()
+            get_supabase_client()
             .table("job_templates")
             .select("config")
             .eq("id", body.template_id)
@@ -81,14 +77,11 @@ async def create_job_with_template(body: CreateJobRequest, request: Request) -> 
             .execute()
         )
         if not template_result.data:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "Template not found", "code": "TEMPLATE_NOT_FOUND"},
-            )
+            raise TemplateNotFoundError(body.template_id)
         merged = {**template_result.data["config"], **config}
         config = merged
 
-    result = _client().table("jobs").insert({
+    result = get_supabase_client().table("jobs").insert({
         "config": config,
         "status": "queued",
         "notification_email": body.notification_email,
@@ -107,7 +100,7 @@ async def get_job(job_id: str, request: Request) -> dict:
     supabase = request.app.state.supabase
     job = job_service.get_job(supabase, job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise JobNotFoundError(job_id)
     return job
 
 
@@ -148,12 +141,10 @@ async def pause_job(job_id: str, request: Request) -> dict:
     supabase = request.app.state.supabase
     job = _get_job_or_404(supabase, job_id)
     if job["status"] in TERMINAL_STATES:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": f"Cannot pause job in {job['status']} state",
-                "code": "INVALID_STATE_TRANSITION",
-            },
+        raise InvalidStateTransitionError(
+            current=job["status"],
+            target="paused",
+            valid_transitions=["generating", "queued"],
         )
     supabase.table("jobs").update({"status": "paused"}).eq("id", job_id).execute()
     log.info("api.job.paused", job_id=job_id)
