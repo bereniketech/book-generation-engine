@@ -29,6 +29,7 @@ dependencies = [
     "structlog>=24.1.0",
     "redis[asyncio]>=5.0.0",
     "textstat>=0.7.3",
+    "jinja2>=3.0.0",
 ]
 
 [project.optional-dependencies]

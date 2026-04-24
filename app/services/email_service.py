@@ -5,8 +5,10 @@ import asyncio
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import aiosmtplib
+from jinja2 import Environment, FileSystemLoader
 
 from app.config import settings
 
@@ -14,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 RETRY_DELAY_SECONDS = 60
 MAX_ATTEMPTS = 2
+
+# Initialize Jinja2 environment for email templates
+TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+jinja_env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
 
 
 async def send_completion_email(
@@ -41,31 +47,28 @@ async def send_completion_email(
 
 
 async def _send(to_email: str, download_url: str, book_title: str) -> None:
+    # Prepare template context
+    context = {
+        "book_title": book_title,
+        "download_url": download_url,
+    }
+
+    # Render templates
+    plain_template = jinja_env.get_template("email/completion_plain.txt.j2")
+    html_template = jinja_env.get_template("email/completion_html.html.j2")
+    text_body = plain_template.render(context)
+    html_body = html_template.render(context)
+
+    # Create email message
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"Your book '{book_title}' is ready for download!"
     msg["From"] = settings.smtp_user or "noreply@bookengine.io"
     msg["To"] = to_email
 
-    text_body = (
-        f"Your KDP bundle for '{book_title}' is ready.\n\n"
-        f"Download link (valid for 7 days):\n{download_url}\n\n"
-        "The bundle contains: manuscript.epub, manuscript.pdf, cover.jpg, "
-        "cover-brief.txt, description.txt, metadata.json\n"
-    )
-    html_body = f"""
-    <html><body>
-    <h2>Your book is ready!</h2>
-    <p>Your KDP bundle for <strong>{book_title}</strong> has been generated.</p>
-    <p><a href="{download_url}"
-    style="background:#1a1a2e;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;">
-    Download KDP Bundle</a></p>
-    <p>Link valid for 7 days. Bundle includes: manuscript.epub, manuscript.pdf, cover.jpg,
-    cover-brief.txt, description.txt, metadata.json</p>
-    </body></html>
-    """
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
+    # Send email
     smtp_host = settings.smtp_host or "localhost"
     smtp_port = settings.smtp_port
 
