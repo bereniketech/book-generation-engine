@@ -74,3 +74,68 @@ def test_get_chapter_not_found_error_contains_job_and_index():
     assert body["detail"]["code"] == "CHAPTER_NOT_FOUND"
     assert "7" in body["detail"]["error"]
     assert "job-xyz" in body["detail"]["error"]
+
+
+def test_list_chapters_truncates_content_preview():
+    """WHEN list_chapters is called THEN content_preview SHALL be truncated to 200 chars."""
+    from app.domain.constants import CHAPTER_PREVIEW_CHARS
+    mock_supabase = MagicMock()
+    long_content = "word " * 100  # Creates text longer than 200 chars
+    mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = [
+        {
+            "index": 0,
+            "content": long_content,
+            "status": "generating",
+            "qa_score": 8.5,
+        }
+    ]
+    client = _make_client(mock_supabase)
+    resp = client.get("/jobs/job-1/chapters")
+    assert resp.status_code == 200
+    data = resp.json()
+    preview = data["chapters"][0]["content_preview"]
+    assert len(preview) <= CHAPTER_PREVIEW_CHARS + 1  # +1 for the ellipsis
+
+
+def test_list_chapters_preview_truncates_at_word_boundary():
+    """WHEN content exceeds 200 chars THEN preview SHALL truncate at last space with ellipsis."""
+    mock_supabase = MagicMock()
+    # Create content that's exactly past 200 chars with identifiable words
+    content = "word " * 50 + "verylongwordwithoutspaces"  # ~250 chars
+    mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = [
+        {
+            "index": 0,
+            "content": content,
+            "status": "generating",
+            "qa_score": 8.5,
+        }
+    ]
+    client = _make_client(mock_supabase)
+    resp = client.get("/jobs/job-1/chapters")
+    assert resp.status_code == 200
+    data = resp.json()
+    preview = data["chapters"][0]["content_preview"]
+    # Should end with ellipsis and not cut in middle of word
+    assert preview.endswith("…")
+    assert "verylongwordwithoutspaces" not in preview
+
+
+def test_list_chapters_preview_no_truncation_if_short():
+    """WHEN content is under 200 chars THEN preview SHALL be full content without ellipsis."""
+    mock_supabase = MagicMock()
+    content = "Short chapter content."
+    mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = [
+        {
+            "index": 0,
+            "content": content,
+            "status": "generating",
+            "qa_score": 8.5,
+        }
+    ]
+    client = _make_client(mock_supabase)
+    resp = client.get("/jobs/job-1/chapters")
+    assert resp.status_code == 200
+    data = resp.json()
+    preview = data["chapters"][0]["content_preview"]
+    assert preview == content
+    assert not preview.endswith("…")

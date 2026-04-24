@@ -1,5 +1,7 @@
 {
   "/_not-found/page": "app/_not-found/page.js",
+  "/jobs/[id]/chapters/page": "app/jobs/[id]/chapters/page.js",
+  "/jobs/[id]/cover/page": "app/jobs/[id]/cover/page.js",
   "/jobs/[id]/export/page": "app/jobs/[id]/export/page.js",
   "/jobs/[id]/page": "app/jobs/[id]/page.js",
   "/page": "app/page.js"
