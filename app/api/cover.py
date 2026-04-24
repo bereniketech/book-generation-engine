@@ -14,25 +14,11 @@ from app.infrastructure.http_exceptions import (
     JobNotFoundError,
 )
 from app.infrastructure.security import redact_sensitive_fields
-from app.services import cover_revision_service
+from app.services import cover_revision_service, job_service
 
 log = get_logger(__name__)
 
 router = APIRouter(prefix="/jobs", tags=["cover"])
-
-
-def _get_job_or_404(supabase: Client, job_id: str) -> dict:
-    result = (
-        supabase
-        .table("jobs")
-        .select("id,status,cover_status,cover_url,config")
-        .eq("id", job_id)
-        .single()
-        .execute()
-    )
-    if not result.data:
-        raise JobNotFoundError(job_id)
-    return result.data
 
 
 def _validate_cover_transition(job: dict, target: str) -> None:
@@ -57,7 +43,7 @@ async def get_cover(
     job_id: str,
     supabase: Client = Depends(get_supabase),
 ):
-    job = _get_job_or_404(supabase, job_id)
+    job = job_service.get_job_or_404(supabase, job_id, fields="id,status,cover_status,cover_url,config")
     return redact_sensitive_fields({
         "job_id": job_id,
         "cover_url": job.get("cover_url"),
@@ -70,7 +56,7 @@ async def approve_cover(
     job_id: str,
     supabase: Client = Depends(get_supabase),
 ):
-    job = _get_job_or_404(supabase, job_id)
+    job = job_service.get_job_or_404(supabase, job_id, fields="id,status,cover_status,cover_url,config")
     _validate_cover_transition(job, "approved")
     supabase.table("jobs").update({
         "cover_status": "approved",
@@ -86,7 +72,7 @@ async def revise_cover(
     body: ReviseRequest,
     supabase: Client = Depends(get_supabase),
 ):
-    job = _get_job_or_404(supabase, job_id)
+    job = job_service.get_job_or_404(supabase, job_id, fields="id,status,cover_status,cover_url,config")
     _validate_cover_transition(job, "revising")
 
     # Record the revision in the audit trail

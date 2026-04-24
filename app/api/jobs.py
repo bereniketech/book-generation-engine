@@ -38,11 +38,6 @@ class CreateJobRequest(BaseModel):
     notification_email: str | None = None
 
 
-def _get_job_or_404(supabase: Client, job_id: str) -> dict:
-    result = supabase.table("jobs").select("*").eq("id", job_id).single().execute()
-    if not result.data:
-        raise JobNotFoundError(job_id)
-    return result.data
 
 
 @router.post("/jobs", status_code=status.HTTP_201_CREATED, response_model=JobResponse)
@@ -120,7 +115,7 @@ async def get_job_tokens(
     job_id: str,
     supabase: Client = Depends(get_supabase),
 ) -> dict:
-    _get_job_or_404(supabase, job_id)
+    job_service.get_job_or_404(supabase, job_id)
     return get_job_usage(job_id)
 
 
@@ -153,7 +148,7 @@ async def pause_job(
     supabase: Client = Depends(get_supabase),
 ) -> dict:
     """Pause a running job. Returns 409 if the transition is not allowed."""
-    job = _get_job_or_404(supabase, job_id)
+    job = job_service.get_job_or_404(supabase, job_id)
     try:
         job_state_machine.validate_transition(job["status"], "paused")
     except DomainInvalidStateTransitionError as exc:
@@ -173,7 +168,7 @@ async def resume_job(
     supabase: Client = Depends(get_supabase),
 ) -> dict:
     """Resume a paused job by setting status back to queued. Returns 409 if not allowed."""
-    job = _get_job_or_404(supabase, job_id)
+    job = job_service.get_job_or_404(supabase, job_id)
     try:
         job_state_machine.validate_transition(job["status"], "queued")
     except DomainInvalidStateTransitionError as exc:
@@ -193,7 +188,7 @@ async def cancel_job(
     supabase: Client = Depends(get_supabase),
 ) -> Response:
     """Cancel a job. Returns 204 No Content."""
-    _get_job_or_404(supabase, job_id)
+    job_service.get_job_or_404(supabase, job_id)
     supabase.table("jobs").update({"status": "cancelled"}).eq("id", job_id).execute()
     log.info("api.job.cancelled", job_id=job_id)
     return Response(status_code=204)
@@ -205,7 +200,7 @@ async def restart_job(
     supabase: Client = Depends(get_supabase),
 ) -> dict:
     """Create a new queued job cloned from the given job's config."""
-    job = _get_job_or_404(supabase, job_id)
+    job = job_service.get_job_or_404(supabase, job_id)
     new_job = supabase.table("jobs").insert(
         {
             "config": job["config"],
