@@ -6,6 +6,7 @@ import logging
 from supabase import Client
 
 from app.infrastructure.security import redact_sensitive_fields
+from app.services import cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -61,4 +62,45 @@ def get_job_or_404(supabase: Client, job_id: str, fields: str = "*") -> dict:
     )
     if not result.data:
         raise JobNotFoundError(job_id)
+    return result.data
+
+
+async def get_job_or_404_cached(supabase: Client, job_id: str, fields: str = "*") -> dict:
+    """Fetch job by ID with caching, or raise JobNotFoundError.
+
+    Checks Redis cache first for 5-minute TTL. Falls back to database if not cached.
+    Use this for hot-path endpoints where response time is critical.
+
+    Args:
+        supabase: Supabase client instance
+        job_id: Job UUID to fetch
+        fields: Comma-separated list of columns to retrieve (default: all columns)
+
+    Returns:
+        Job record as dictionary with specified fields (from cache or database)
+
+    Raises:
+        JobNotFoundError: If job with given ID does not exist
+
+    Example:
+        >>> job = await get_job_or_404_cached(supabase, "job-123")
+    """
+    from app.infrastructure.http_exceptions import JobNotFoundError
+
+    cached = await cache_service.get_cached_job(job_id)
+    if cached:
+        return cached
+
+    result = (
+        supabase
+        .table("jobs")
+        .select(fields)
+        .eq("id", job_id)
+        .single()
+        .execute()
+    )
+    if not result.data:
+        raise JobNotFoundError(job_id)
+
+    await cache_service.cache_job(job_id, result.data)
     return result.data
